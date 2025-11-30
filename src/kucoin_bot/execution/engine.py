@@ -3,7 +3,7 @@
 import asyncio
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -268,7 +268,7 @@ class ExecutionEngine:
                 order.filled_size = updated_order.filled_size
                 order.filled_price = updated_order.filled_price
                 order.fee = updated_order.fee
-                order.updated_at = datetime.utcnow()
+                order.updated_at = datetime.now(UTC)
 
                 self.executed_orders.append(order)
                 if order.client_order_id in self.pending_orders:
@@ -286,7 +286,7 @@ class ExecutionEngine:
 
             if updated_order.status in [OrderStatus.CANCELLED, OrderStatus.FAILED]:
                 order.status = updated_order.status
-                order.updated_at = datetime.utcnow()
+                order.updated_at = datetime.now(UTC)
 
                 if order.client_order_id in self.pending_orders:
                     del self.pending_orders[order.client_order_id]

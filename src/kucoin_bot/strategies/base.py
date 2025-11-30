@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+import numpy as np
 import structlog
 
 from kucoin_bot.config import StrategySettings
@@ -398,8 +399,6 @@ class ScalpingStrategy(BaseStrategy):
         current_rsi = rsi[-1]
         current_stoch_k = stoch_k[-1]
         current_stoch_d = stoch_d[-1]
-
-        import numpy as np
 
         if np.isnan(current_rsi) or np.isnan(current_stoch_k):
             return TradingSignal(

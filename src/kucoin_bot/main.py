@@ -2,7 +2,7 @@
 
 import asyncio
 import signal
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -72,7 +72,7 @@ class TradingBot:
         )
 
         self._running = True
-        self._start_time = datetime.utcnow()
+        self._start_time = datetime.now(UTC)
 
         # Set up signal handlers
         loop = asyncio.get_event_loop()
@@ -312,7 +312,7 @@ class TradingBot:
 
                 # Update uptime
                 if self._start_time:
-                    uptime = (datetime.utcnow() - self._start_time).total_seconds()
+                    uptime = (datetime.now(UTC) - self._start_time).total_seconds()
                     metrics.bot_uptime.set(uptime)
 
                 # Update position metrics
@@ -432,7 +432,7 @@ class TradingBot:
 
         return {
             "running": self._running,
-            "uptime": str(datetime.utcnow() - self._start_time) if self._start_time else "0",
+            "uptime": str(datetime.now(UTC) - self._start_time) if self._start_time else "0",
             "strategy": self.strategy.name,
             "trading_pairs": self.trading_pairs,
             "environment": self.settings.app.environment.value,

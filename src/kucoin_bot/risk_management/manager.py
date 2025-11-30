@@ -1,7 +1,7 @@
 """Risk management system for the trading bot."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -66,7 +66,7 @@ class RiskManager:
         self.positions: dict[str, Position] = {}
         self.orders: dict[str, Order] = {}
         self.daily_trades: int = 0
-        self.last_trade_reset: datetime = datetime.utcnow()
+        self.last_trade_reset: datetime = datetime.now(UTC)
         self.portfolio_value: Decimal = Decimal("0")
         self.peak_value: Decimal = Decimal("0")
         self.daily_pnl: Decimal = Decimal("0")
@@ -140,7 +140,7 @@ class RiskManager:
 
     def _reset_daily_trades_if_needed(self) -> None:
         """Reset daily trade counter if a new day has started."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         if now.date() > self.last_trade_reset.date():
             self.daily_trades = 0
             self.daily_pnl = Decimal("0")
@@ -424,7 +424,7 @@ class RiskManager:
             pnl: Realized profit/loss
         """
         self.trade_history.append({
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(UTC),
             "symbol": symbol,
             "side": side.value,
             "entry_price": str(entry_price),

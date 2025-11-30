@@ -1,11 +1,16 @@
 """Data models for the KuCoin trading bot using Pydantic."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated
 
 from pydantic import BaseModel, Field
+
+
+def utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(UTC)
 
 
 class OrderSide(str, Enum):
@@ -132,7 +137,7 @@ class Order(BaseModel):
     filled_price: Annotated[Decimal | None, Field(default=None, ge=0)]
     fee: Annotated[Decimal, Field(default=Decimal("0"), ge=0)]
     fee_currency: str = "USDT"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime | None = None
 
     @property
@@ -163,7 +168,7 @@ class Position(BaseModel):
     current_price: Annotated[Decimal, Field(gt=0)]
     stop_loss: Annotated[Decimal | None, Field(default=None, gt=0)]
     take_profit: Annotated[Decimal | None, Field(default=None, gt=0)]
-    opened_at: datetime = Field(default_factory=datetime.utcnow)
+    opened_at: datetime = Field(default_factory=utc_now)
     order_ids: list[str] = Field(default_factory=list)
 
     @property
@@ -194,7 +199,7 @@ class TradingSignal(BaseModel):
     signal_type: SignalType
     confidence: Annotated[float, Field(ge=0, le=1)]
     price: Annotated[Decimal, Field(gt=0)]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     indicators: dict[str, float] = Field(default_factory=dict)
     reason: str = ""
 

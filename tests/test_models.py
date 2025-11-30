@@ -1,6 +1,6 @@
 """Tests for data models."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from kucoin_bot.models.data_models import (
@@ -32,7 +32,7 @@ class TestTicker:
             change_24h=Decimal("2.5"),
             high_24h=Decimal("51000"),
             low_24h=Decimal("49000"),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
         assert ticker.spread == Decimal("20")
         assert ticker.spread_percent == Decimal("0.04")
@@ -45,7 +45,7 @@ class TestCandle:
         """Test bullish candle detection."""
         candle = Candle(
             symbol="BTC-USDT",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             open=Decimal("50000"),
             high=Decimal("51000"),
             low=Decimal("49500"),
@@ -60,7 +60,7 @@ class TestCandle:
         """Test bearish candle detection."""
         candle = Candle(
             symbol="BTC-USDT",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             open=Decimal("50500"),
             high=Decimal("51000"),
             low=Decimal("49500"),
@@ -183,7 +183,7 @@ class TestMarketDepth:
                 (Decimal("50010"), Decimal("1.5")),
                 (Decimal("50020"), Decimal("2.5")),
             ],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
         )
         assert depth.best_bid == Decimal("49990")
         assert depth.best_ask == Decimal("50010")

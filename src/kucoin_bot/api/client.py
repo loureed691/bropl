@@ -29,6 +29,9 @@ from kucoin_bot.models.data_models import (
 
 logger = structlog.get_logger()
 
+# Conversion constant for nanoseconds to seconds
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
 
 class KuCoinAPIError(Exception):
     """Custom exception for KuCoin API errors."""
@@ -639,7 +642,9 @@ class KuCoinClient:
                     size=Decimal(trade_data.get("size", "0")),
                     fee=Decimal("0"),
                     fee_currency="USDT",
-                    timestamp=datetime.fromtimestamp(trade_data.get("time", 0) / 1000000000),
+                    timestamp=datetime.fromtimestamp(
+                        trade_data.get("time", 0) / NANOSECONDS_PER_SECOND
+                    ),
                     is_maker=False,
                 )
             )

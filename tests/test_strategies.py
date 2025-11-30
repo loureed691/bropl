@@ -1,6 +1,6 @@
 """Tests for trading strategies."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -28,7 +28,7 @@ class TestStrategyState:
         for i in range(15):
             candle = Candle(
                 symbol="BTC-USDT",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 open=Decimal(str(100 + i)),
                 high=Decimal(str(105 + i)),
                 low=Decimal(str(95 + i)),
@@ -47,7 +47,7 @@ class TestStrategyState:
         for i in range(5):
             candle = Candle(
                 symbol="BTC-USDT",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 open=Decimal("100"),
                 high=Decimal("105"),
                 low=Decimal("95"),
@@ -88,7 +88,7 @@ class TestMomentumStrategy:
         """Test strategy with insufficient data."""
         candle = Candle(
             symbol="BTC-USDT",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             open=Decimal("50000"),
             high=Decimal("50500"),
             low=Decimal("49500"),
@@ -109,7 +109,7 @@ class TestMomentumStrategy:
         for i in range(60):
             candle = Candle(
                 symbol="BTC-USDT",
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 open=Decimal(str(50000 + i * 10)),
                 high=Decimal(str(50100 + i * 10)),
                 low=Decimal(str(49900 + i * 10)),

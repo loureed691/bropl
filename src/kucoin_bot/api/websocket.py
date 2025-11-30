@@ -18,6 +18,9 @@ from kucoin_bot.models.data_models import Candle, MarketDepth, Ticker, Trade
 
 logger = structlog.get_logger()
 
+# Conversion constant for nanoseconds to seconds
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
 
 class WebSocketManager:
     """Manages WebSocket connections to KuCoin for real-time data."""
@@ -323,7 +326,7 @@ class WebSocketManager:
                 size=Decimal(str(data.get("size", "0"))),
                 fee=Decimal("0"),
                 fee_currency="USDT",
-                timestamp=datetime.fromtimestamp(data.get("time", 0) / 1000000000),
+                timestamp=datetime.fromtimestamp(data.get("time", 0) / NANOSECONDS_PER_SECOND),
                 is_maker=data.get("makerOrderId") == data.get("takerOrderId"),
             )
             callback(trade)
