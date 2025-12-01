@@ -171,7 +171,7 @@ class KuCoinClient:
         params: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         authenticated: bool = True,
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Make an API request with retry logic.
 
         Args:
@@ -269,11 +269,12 @@ class KuCoinClient:
         Returns:
             24-hour statistics
         """
-        return await self._request(
+        result: dict[str, Any] = await self._request(
             "GET",
             f"/api/v1/market/stats?symbol={symbol}",
             authenticated=False,
         )
+        return result
 
     async def get_candles(
         self,
@@ -462,7 +463,7 @@ class KuCoinClient:
             size=str(size),
         )
 
-        return Order(
+        return Order(  # type: ignore[call-arg]
             id=data.get("orderId"),
             client_order_id=client_order_id,
             symbol=symbol,
@@ -713,7 +714,10 @@ class KuCoinClient:
         Returns:
             List of symbol information
         """
-        return await self._request("GET", "/api/v1/symbols", authenticated=False)
+        result: list[dict[str, Any]] = await self._request(
+            "GET", "/api/v1/symbols", authenticated=False
+        )
+        return result
 
     async def ping(self) -> bool:
         """Check API connectivity.

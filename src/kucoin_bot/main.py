@@ -2,6 +2,7 @@
 
 import asyncio
 import signal
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -184,16 +185,28 @@ class TradingBot:
         """Subscribe to real-time market data."""
         for symbol in self.trading_pairs:
             # Subscribe to ticker updates
+            # Create bound callback for ticker
+            def make_ticker_callback(s: str) -> Callable[[Ticker], None]:
+                def callback(ticker: Ticker) -> None:
+                    self._on_ticker(s, ticker)
+                return callback
+
             await self.ws_manager.subscribe_ticker(
                 symbol,
-                lambda ticker, s=symbol: self._on_ticker(s, ticker),
+                make_ticker_callback(symbol),
             )
 
             # Subscribe to candle updates
+            # Create bound callback for candles
+            def make_candle_callback(s: str) -> Callable[[Candle], None]:
+                def callback(candle: Candle) -> None:
+                    asyncio.create_task(self._on_candle(s, candle))
+                return callback
+
             await self.ws_manager.subscribe_candles(
                 symbol,
                 "1hour",
-                lambda candle, s=symbol: asyncio.create_task(self._on_candle(s, candle)),
+                make_candle_callback(symbol),
             )
 
             self.logger.info("Subscribed to market data", symbol=symbol)
@@ -317,8 +330,14 @@ class TradingBot:
 
                 # Update position metrics
                 positions = self.risk_manager.positions
-                total_value = sum(p.position_value for p in positions.values())
-                unrealized_pnl = sum(p.unrealized_pnl for p in positions.values())
+                total_value = sum(
+                    (p.position_value for p in positions.values()),
+                    Decimal("0"),
+                )
+                unrealized_pnl = sum(
+                    (p.unrealized_pnl for p in positions.values()),
+                    Decimal("0"),
+                )
 
                 metrics.update_positions(
                     count=len(positions),

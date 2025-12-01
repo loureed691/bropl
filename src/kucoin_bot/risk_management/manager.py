@@ -92,7 +92,8 @@ class RiskManager:
         self._reset_daily_trades_if_needed()
 
         total_exposure = sum(
-            p.size * p.current_price for p in self.positions.values()
+            (p.size * p.current_price for p in self.positions.values()),
+            Decimal("0"),
         )
         max_exposure = Decimal(str(self.trading_settings.max_position_size))
 
@@ -461,16 +462,19 @@ class RiskManager:
         winning_trades = sum(1 for t in self.trade_history if Decimal(t["pnl"]) > 0)
         losing_trades = sum(1 for t in self.trade_history if Decimal(t["pnl"]) < 0)
 
-        total_pnl = sum(Decimal(t["pnl"]) for t in self.trade_history)
+        total_pnl = sum(
+            (Decimal(t["pnl"]) for t in self.trade_history),
+            Decimal("0"),
+        )
 
         wins = [Decimal(t["pnl"]) for t in self.trade_history if Decimal(t["pnl"]) > 0]
         losses = [Decimal(t["pnl"]) for t in self.trade_history if Decimal(t["pnl"]) < 0]
 
-        average_win = sum(wins) / len(wins) if wins else Decimal("0")
-        average_loss = sum(losses) / len(losses) if losses else Decimal("0")
+        average_win = sum(wins, Decimal("0")) / len(wins) if wins else Decimal("0")
+        average_loss = sum(losses, Decimal("0")) / len(losses) if losses else Decimal("0")
 
-        total_wins = sum(wins) if wins else Decimal("0")
-        total_losses = abs(sum(losses)) if losses else Decimal("1")
+        total_wins = sum(wins, Decimal("0"))
+        total_losses = abs(sum(losses, Decimal("0"))) if losses else Decimal("1")
         profit_factor = float(total_wins / total_losses) if total_losses > 0 else 0.0
 
         return {
