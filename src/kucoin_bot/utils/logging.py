@@ -55,7 +55,7 @@ def setup_logging(log_level: LogLevel, log_format: str = "json") -> None:
     )
 
 
-def get_logger(name: str | None = None, **kwargs: Any) -> Any:
+def get_logger(name: str | None = None, **kwargs: Any) -> structlog.stdlib.BoundLogger:
     """Get a logger instance.
 
     Args:
@@ -65,7 +65,7 @@ def get_logger(name: str | None = None, **kwargs: Any) -> Any:
     Returns:
         Configured logger instance
     """
-    log = structlog.get_logger(name)
+    log: structlog.stdlib.BoundLogger = structlog.get_logger(name)
     if kwargs:
         log = log.bind(**kwargs)
     return log

@@ -180,33 +180,32 @@ class TradingBot:
                     symbol=symbol,
                     error=str(e),
                 )
+    def _make_ticker_callback(self, symbol: str) -> Callable[[Ticker], None]:
+        """Create a ticker callback bound to a specific symbol."""
+        def callback(ticker: Ticker) -> None:
+            self._on_ticker(symbol, ticker)
+        return callback
+
+    def _make_candle_callback(self, symbol: str) -> Callable[[Candle], None]:
+        """Create a candle callback bound to a specific symbol."""
+        def callback(candle: Candle) -> None:
+            asyncio.create_task(self._on_candle(symbol, candle))
+        return callback
 
     async def _subscribe_market_data(self) -> None:
         """Subscribe to real-time market data."""
         for symbol in self.trading_pairs:
             # Subscribe to ticker updates
-            # Create bound callback for ticker
-            def make_ticker_callback(s: str) -> Callable[[Ticker], None]:
-                def callback(ticker: Ticker) -> None:
-                    self._on_ticker(s, ticker)
-                return callback
-
             await self.ws_manager.subscribe_ticker(
                 symbol,
-                make_ticker_callback(symbol),
+                self._make_ticker_callback(symbol),
             )
 
             # Subscribe to candle updates
-            # Create bound callback for candles
-            def make_candle_callback(s: str) -> Callable[[Candle], None]:
-                def callback(candle: Candle) -> None:
-                    asyncio.create_task(self._on_candle(s, candle))
-                return callback
-
             await self.ws_manager.subscribe_candles(
                 symbol,
                 "1hour",
-                make_candle_callback(symbol),
+                self._make_candle_callback(symbol),
             )
 
             self.logger.info("Subscribed to market data", symbol=symbol)
