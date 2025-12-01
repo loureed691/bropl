@@ -64,6 +64,14 @@ class TradingSettings(BaseSettings):
     max_position_size: Annotated[float, Field(default=1000.0, gt=0, description="Maximum position size")]
     max_daily_trades: Annotated[int, Field(default=50, gt=0, description="Maximum daily trades")]
 
+    # Auto-selection settings
+    auto_select_pairs: Annotated[bool, Field(default=False, description="Enable auto-selection of best trading pairs")]
+    auto_select_count: Annotated[int, Field(default=5, gt=0, le=20, description="Number of top pairs to auto-select")]
+    auto_select_interval: Annotated[int, Field(default=3600, gt=60, le=86400, description="Pair scan interval in seconds (60s - 24h)")]
+    auto_select_min_volume: Annotated[float, Field(default=100000.0, gt=0, description="Minimum 24h volume for pair selection")]
+    auto_select_min_signal: Annotated[float, Field(default=0.5, ge=0, le=1, description="Minimum signal strength for pair selection")]
+    auto_select_signal_type: Annotated[str, Field(default="any", description="Signal type filter: any, bullish, or bearish")]
+
     @field_validator("trading_pairs")
     @classmethod
     def validate_trading_pairs(cls, v: str) -> str:
@@ -73,6 +81,16 @@ class TradingSettings(BaseSettings):
             if "-" not in pair:
                 raise ValueError(f"Invalid trading pair format: {pair}. Expected format: BASE-QUOTE")
         return ",".join(pairs)
+
+    @field_validator("auto_select_signal_type")
+    @classmethod
+    def validate_auto_select_signal_type(cls, v: str) -> str:
+        """Validate auto-select signal type."""
+        valid_types = ["any", "bullish", "bearish"]
+        v = v.lower().strip()
+        if v not in valid_types:
+            raise ValueError(f"Invalid signal type: {v}. Must be one of: {valid_types}")
+        return v
 
     def get_pairs_list(self) -> list[str]:
         """Return trading pairs as a list."""

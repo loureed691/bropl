@@ -7,12 +7,23 @@ A sophisticated, production-ready cryptocurrency trading bot for KuCoin exchange
 ### 🚀 Core Capabilities
 
 - **Async Architecture**: Built entirely on asyncio for high-performance, non-blocking operations
+- **Auto-Selection of Best Trading Pairs**: Automatically scans and selects USDT pairs with the strongest signals
 - **Multiple Trading Strategies**: 
   - Momentum Trading (RSI + EMA crossovers + MACD)
   - Mean Reversion (Bollinger Bands)
   - Grid Trading (for ranging markets)
   - Scalping (high-frequency short-term trades)
   - DCA (Dollar Cost Averaging for accumulation)
+
+### 🔍 Auto Pair Selection
+
+The bot can automatically scan all available USDT trading pairs and select those with the strongest signals:
+
+- **Volume Filtering**: Only considers pairs with sufficient 24-hour volume
+- **Signal Analysis**: Uses RSI, MACD, Bollinger Bands, and trend indicators
+- **Composite Scoring**: Ranks pairs based on signal strength, volume, and volatility
+- **Periodic Re-scanning**: Automatically updates pair selection at configurable intervals
+- **Signal Type Filtering**: Can focus on bullish, bearish, or any signals
 
 ### 📊 Technical Analysis
 
@@ -96,6 +107,24 @@ cp .env.example .env
 | `STRATEGY_NAME` | Trading strategy to use | `momentum` |
 | `USE_SANDBOX` | Use KuCoin sandbox environment | `true` |
 
+### Auto-Selection Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AUTO_SELECT_PAIRS` | Enable auto-selection of best trading pairs | `false` |
+| `AUTO_SELECT_COUNT` | Number of top pairs to auto-select (1-20) | `5` |
+| `AUTO_SELECT_INTERVAL` | Pair scan interval in seconds | `3600` |
+| `AUTO_SELECT_MIN_VOLUME` | Minimum 24h volume for pair selection | `100000` |
+| `AUTO_SELECT_MIN_SIGNAL` | Minimum signal strength (0.0-1.0) | `0.5` |
+| `AUTO_SELECT_SIGNAL_TYPE` | Signal type filter: `any`, `bullish`, or `bearish` | `any` |
+
+When `AUTO_SELECT_PAIRS` is enabled, the bot will:
+1. Scan all available USDT trading pairs on startup
+2. Analyze each pair using technical indicators
+3. Rank pairs by a composite score based on signal strength, volume, and volatility
+4. Select the top pairs with the strongest signals
+5. Periodically re-scan and update the selected pairs
+
 ### Available Strategies
 
 - `momentum`: Uses RSI, EMA crossovers, and MACD for trend following
@@ -147,6 +176,8 @@ src/kucoin_bot/
 │   └── technical.py    # Technical analysis indicators
 ├── models/
 │   └── data_models.py  # Pydantic data models
+├── pair_selector/
+│   └── selector.py     # Auto-selection of best trading pairs
 ├── risk_management/
 │   └── manager.py      # Risk management system
 ├── strategies/
