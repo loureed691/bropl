@@ -14,6 +14,7 @@ from kucoin_bot.api.websocket import WebSocketManager
 from kucoin_bot.config import Settings, get_settings
 from kucoin_bot.execution.engine import ExecutionEngine
 from kucoin_bot.models.data_models import Candle, Ticker
+from kucoin_bot.pair_selector.selector import PairSelector
 from kucoin_bot.risk_management.manager import RiskManager
 from kucoin_bot.strategies.base import BaseStrategy, create_strategy
 from kucoin_bot.utils.logging import setup_logging
@@ -55,6 +56,16 @@ class TradingBot:
         )
         self.strategy: BaseStrategy = create_strategy(self.settings.strategy)
 
+        # Initialize pair selector for auto-selection
+        self.pair_selector: PairSelector | None = None
+        if self.settings.trading.auto_select_pairs:
+            self.pair_selector = PairSelector(
+                client=self.client,
+                min_volume_24h=Decimal(str(self.settings.trading.auto_select_min_volume)),
+                min_signal_strength=self.settings.trading.auto_select_min_signal,
+                top_pairs_count=self.settings.trading.auto_select_count,
+            )
+
         # Trading state
         self.trading_pairs = self.settings.trading.get_pairs_list()
         self.latest_prices: dict[str, Decimal] = {}
@@ -70,6 +81,7 @@ class TradingBot:
             pairs=self.trading_pairs,
             strategy=self.strategy.name,
             environment="sandbox" if self.settings.app.use_sandbox else "production",
+            auto_select_enabled=self.settings.trading.auto_select_pairs,
         )
 
         self._running = True
@@ -87,6 +99,10 @@ class TradingBot:
             # Verify connectivity
             if not await self.client.ping():
                 raise ConnectionError("Failed to connect to KuCoin API")
+
+            # Auto-select best trading pairs if enabled
+            if self.pair_selector:
+                await self._auto_select_pairs()
 
             # Get initial balances
             await self._update_portfolio()
@@ -114,6 +130,10 @@ class TradingBot:
                 asyncio.create_task(self._monitoring_loop()),
                 asyncio.create_task(self._position_check_loop()),
             ]
+
+            # Add pair selection loop if auto-select is enabled
+            if self.pair_selector:
+                self._tasks.append(asyncio.create_task(self._pair_selection_loop()))
 
             self.logger.info("Trading bot started successfully")
 
@@ -150,6 +170,166 @@ class TradingBot:
         await self.client.close()
 
         self.logger.info("Trading bot stopped")
+
+    async def _auto_select_pairs(self) -> None:
+        """Auto-select the best trading pairs based on signal strength."""
+        if not self.pair_selector:
+            return
+
+        self.logger.info("Auto-selecting best trading pairs...")
+
+        signal_type = self.settings.trading.auto_select_signal_type
+        signal_type_filter = None if signal_type == "any" else signal_type
+
+        selected_pairs = await self.pair_selector.get_top_pairs(
+            signal_type=signal_type_filter,
+            count=self.settings.trading.auto_select_count,
+        )
+
+        if selected_pairs:
+            self.trading_pairs = selected_pairs
+            self.logger.info(
+                "Trading pairs auto-selected",
+                pairs=self.trading_pairs,
+                signal_type=signal_type,
+            )
+
+            # Log details of selected pairs
+            for pair in selected_pairs:
+                score = self.pair_selector.get_pair_details(pair)
+                if score:
+                    self.logger.info(
+                        "Selected pair details",
+                        symbol=pair,
+                        signal_type=score.signal_type,
+                        strength=f"{score.signal_strength:.3f}",
+                        composite_score=f"{score.composite_score:.3f}",
+                        volume_24h=str(score.volume_24h),
+                    )
+        else:
+            self.logger.warning(
+                "No pairs met selection criteria, using configured pairs",
+                fallback_pairs=self.settings.trading.get_pairs_list(),
+            )
+
+    async def _pair_selection_loop(self) -> None:
+        """Periodically re-scan and update trading pairs."""
+        scan_interval = self.settings.trading.auto_select_interval
+
+        while self._running:
+            try:
+                await asyncio.sleep(scan_interval)
+
+                if not self._running or not self.pair_selector:
+                    break
+
+                self.logger.info("Running periodic pair scan...")
+
+                # Get new top pairs
+                signal_type = self.settings.trading.auto_select_signal_type
+                signal_type_filter = None if signal_type == "any" else signal_type
+
+                new_pairs = await self.pair_selector.get_top_pairs(
+                    signal_type=signal_type_filter,
+                    count=self.settings.trading.auto_select_count,
+                )
+
+                if new_pairs and new_pairs != self.trading_pairs:
+                    # Identify changes
+                    added = set(new_pairs) - set(self.trading_pairs)
+                    removed = set(self.trading_pairs) - set(new_pairs)
+
+                    if added or removed:
+                        self.logger.info(
+                            "Trading pairs updated",
+                            added=list(added),
+                            removed=list(removed),
+                            new_pairs=new_pairs,
+                        )
+
+                        # Unsubscribe from removed pairs
+                        for symbol in removed:
+                            await self._unsubscribe_pair(symbol)
+
+                        # Update trading pairs
+                        self.trading_pairs = new_pairs
+
+                        # Subscribe to new pairs
+                        for symbol in added:
+                            await self._subscribe_pair(symbol)
+
+                # Log scan summary
+                summary = self.pair_selector.get_scan_summary()
+                self.logger.info(
+                    "Pair scan summary",
+                    total_pairs=summary["total_pairs"],
+                    bullish=summary["bullish_count"],
+                    bearish=summary["bearish_count"],
+                    neutral=summary["neutral_count"],
+                )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in pair selection loop", error=str(e))
+                await asyncio.sleep(60)  # Wait before retry
+
+    async def _subscribe_pair(self, symbol: str) -> None:
+        """Subscribe to market data for a new pair.
+
+        Args:
+            symbol: Trading pair symbol
+        """
+        try:
+            # Load historical data for the new pair
+            candles = await self.client.get_candles(
+                symbol=symbol,
+                interval="1hour",
+            )
+            self.candle_buffers[symbol] = candles
+
+            # Warm up strategy
+            for candle in candles:
+                self.strategy.update(symbol, candle)
+
+            # Subscribe to real-time data
+            await self.ws_manager.subscribe_ticker(
+                symbol,
+                self._make_ticker_callback(symbol),
+            )
+            await self.ws_manager.subscribe_candles(
+                symbol,
+                "1hour",
+                self._make_candle_callback(symbol),
+            )
+
+            self.logger.info("Subscribed to new pair", symbol=symbol)
+
+        except Exception as e:
+            self.logger.error("Failed to subscribe to pair", symbol=symbol, error=str(e))
+
+    async def _unsubscribe_pair(self, symbol: str) -> None:
+        """Unsubscribe from market data for a pair.
+
+        Args:
+            symbol: Trading pair symbol
+        """
+        try:
+            # Clean up candle buffer
+            if symbol in self.candle_buffers:
+                del self.candle_buffers[symbol]
+
+            # Clean up latest prices
+            if symbol in self.latest_prices:
+                del self.latest_prices[symbol]
+
+            # Reset strategy state for this symbol
+            self.strategy.reset(symbol)
+
+            self.logger.info("Unsubscribed from pair", symbol=symbol)
+
+        except Exception as e:
+            self.logger.error("Failed to unsubscribe from pair", symbol=symbol, error=str(e))
 
     async def _load_historical_data(self) -> None:
         """Load historical candle data for strategies."""
@@ -448,12 +628,13 @@ class TradingBot:
         exec_stats = self.execution_engine.get_execution_stats()
         trade_stats = self.risk_manager.get_trade_statistics()
 
-        return {
+        status = {
             "running": self._running,
             "uptime": str(datetime.now(UTC) - self._start_time) if self._start_time else "0",
             "strategy": self.strategy.name,
             "trading_pairs": self.trading_pairs,
             "environment": self.settings.app.environment.value,
+            "auto_select_enabled": self.settings.trading.auto_select_pairs,
             "risk_metrics": {
                 "portfolio_value": str(risk_metrics.portfolio_value),
                 "open_positions": risk_metrics.open_positions,
@@ -464,6 +645,12 @@ class TradingBot:
             "execution_stats": exec_stats,
             "trade_statistics": trade_stats,
         }
+
+        # Add pair selection info if enabled
+        if self.pair_selector:
+            status["pair_selection"] = self.pair_selector.get_scan_summary()
+
+        return status
 
 
 async def run_bot() -> None:
