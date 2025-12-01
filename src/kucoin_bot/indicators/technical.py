@@ -307,7 +307,7 @@ class TechnicalIndicators:
     def support_resistance(
         high: Sequence[float],
         low: Sequence[float],
-        _close: Sequence[float],
+        _: Sequence[float],
         period: int = 20,
     ) -> tuple[list[float], list[float]]:
         """Identify support and resistance levels.
@@ -315,7 +315,7 @@ class TechnicalIndicators:
         Args:
             high: High prices
             low: Low prices
-            _close: Close prices (unused, kept for interface consistency)
+            _: Close prices (unused, kept for interface consistency)
             period: Lookback period
 
         Returns:
@@ -539,15 +539,15 @@ class SignalGenerator:
     def combined_signal(
         self,
         data: Sequence[float],
-        _high: Sequence[float] | None = None,
-        _low: Sequence[float] | None = None,
+        _: Sequence[float] | None = None,
+        __: Sequence[float] | None = None,
     ) -> dict[str, IndicatorResult]:
         """Generate combined signals from multiple indicators.
 
         Args:
             data: Close price data
-            _high: High prices (optional, reserved for future use)
-            _low: Low prices (optional, reserved for future use)
+            _: High prices (optional, reserved for future use)
+            __: Low prices (optional, reserved for future use)
 
         Returns:
             Dictionary of indicator results

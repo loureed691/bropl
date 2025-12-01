@@ -305,11 +305,11 @@ class ExecutionEngine:
             symbol=order.symbol,
         )
 
-    async def _manage_position(self, _signal: TradingSignal, order: Order) -> None:
+    async def _manage_position(self, _: TradingSignal, order: Order) -> None:
         """Manage position after order execution.
 
         Args:
-            _signal: Original trading signal (unused, kept for interface)
+            _: Original trading signal (unused, kept for interface)
             order: Executed order
         """
         if not order.is_filled or not order.filled_price:

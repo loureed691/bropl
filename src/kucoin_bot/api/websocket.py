@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -313,8 +314,6 @@ class WebSocketManager:
         topic = f"/market/match:{symbol}"
 
         def parse_trade(data: dict[str, Any]) -> None:
-            from datetime import datetime
-
             from kucoin_bot.models.data_models import OrderSide
 
             trade = Trade(
@@ -326,7 +325,9 @@ class WebSocketManager:
                 size=Decimal(str(data.get("size", "0"))),
                 fee=Decimal("0"),
                 fee_currency="USDT",
-                timestamp=datetime.fromtimestamp(data.get("time", 0) / NANOSECONDS_PER_SECOND),
+                timestamp=datetime.fromtimestamp(
+                    data.get("time", 0) / NANOSECONDS_PER_SECOND, UTC
+                ),
                 is_maker=data.get("makerOrderId") == data.get("takerOrderId"),
             )
             callback(trade)
@@ -350,8 +351,6 @@ class WebSocketManager:
         topic = f"/spotMarket/level2Depth{depth}:{symbol}"
 
         def parse_orderbook(data: dict[str, Any]) -> None:
-            from datetime import datetime
-
             bids = [(Decimal(p), Decimal(s)) for p, s in data.get("bids", [])]
             asks = [(Decimal(p), Decimal(s)) for p, s in data.get("asks", [])]
 
@@ -359,7 +358,7 @@ class WebSocketManager:
                 symbol=symbol,
                 bids=bids,
                 asks=asks,
-                timestamp=datetime.fromtimestamp(data.get("timestamp", 0) / 1000),
+                timestamp=datetime.fromtimestamp(data.get("timestamp", 0) / 1000, UTC),
             )
             callback(depth_data)
 
@@ -382,13 +381,11 @@ class WebSocketManager:
         topic = f"/market/candles:{symbol}_{interval}"
 
         def parse_candle(data: dict[str, Any]) -> None:
-            from datetime import datetime
-
             candles = data.get("candles", [])
             if candles:
                 candle = Candle(
                     symbol=symbol,
-                    timestamp=datetime.fromtimestamp(int(candles[0])),
+                    timestamp=datetime.fromtimestamp(int(candles[0]), UTC),
                     open=Decimal(candles[1]),
                     close=Decimal(candles[2]),
                     high=Decimal(candles[3]),

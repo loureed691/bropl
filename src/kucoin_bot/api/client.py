@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -257,7 +257,7 @@ class KuCoinClient:
             change_24h=Decimal("0"),  # Not in this endpoint
             high_24h=Decimal("0"),  # Not in this endpoint
             low_24h=Decimal("0"),  # Not in this endpoint
-            timestamp=datetime.fromtimestamp(data.get("time", 0) / 1000),
+            timestamp=datetime.fromtimestamp(data.get("time", 0) / 1000, UTC),
         )
 
     async def get_24h_stats(self, symbol: str) -> dict[str, Any]:
@@ -312,7 +312,7 @@ class KuCoinClient:
             candles.append(
                 Candle(
                     symbol=symbol,
-                    timestamp=datetime.fromtimestamp(int(candle_data[0])),
+                    timestamp=datetime.fromtimestamp(int(candle_data[0]), UTC),
                     open=Decimal(candle_data[1]),
                     close=Decimal(candle_data[2]),
                     high=Decimal(candle_data[3]),
@@ -347,7 +347,7 @@ class KuCoinClient:
             symbol=symbol,
             bids=bids,
             asks=asks,
-            timestamp=datetime.fromtimestamp(data.get("time", 0) / 1000),
+            timestamp=datetime.fromtimestamp(data.get("time", 0) / 1000, UTC),
         )
 
     # ==================== Account Endpoints ====================
@@ -603,14 +603,14 @@ class KuCoinClient:
             size=Decimal(data.get("size", "0")),
             stop_price=Decimal(data["stopPrice"]) if data.get("stopPrice") else None,
             time_in_force=TimeInForce(data.get("timeInForce", "GTC")),
-            status=status_map.get(data.get("isActive") and "active" or "done", OrderStatus.OPEN),
+            status=status_map.get("active" if data.get("isActive") else "done", OrderStatus.OPEN),
             filled_size=Decimal(data.get("dealSize", "0")),
             filled_price=Decimal(data["dealFunds"]) / Decimal(data["dealSize"])
             if data.get("dealSize") and Decimal(data.get("dealSize", "0")) > 0
             else None,
             fee=Decimal(data.get("fee", "0")),
             fee_currency=data.get("feeCurrency", "USDT"),
-            created_at=datetime.fromtimestamp(data.get("createdAt", 0) / 1000),
+            created_at=datetime.fromtimestamp(data.get("createdAt", 0) / 1000, UTC),
         )
 
     # ==================== Trade Endpoints ====================
@@ -643,7 +643,7 @@ class KuCoinClient:
                     fee=Decimal("0"),
                     fee_currency="USDT",
                     timestamp=datetime.fromtimestamp(
-                        trade_data.get("time", 0) / NANOSECONDS_PER_SECOND
+                        trade_data.get("time", 0) / NANOSECONDS_PER_SECOND, UTC
                     ),
                     is_maker=False,
                 )
@@ -689,7 +689,7 @@ class KuCoinClient:
                     size=Decimal(trade_data.get("size", "0")),
                     fee=Decimal(trade_data.get("fee", "0")),
                     fee_currency=trade_data.get("feeCurrency", "USDT"),
-                    timestamp=datetime.fromtimestamp(trade_data.get("createdAt", 0) / 1000),
+                    timestamp=datetime.fromtimestamp(trade_data.get("createdAt", 0) / 1000, UTC),
                     is_maker=trade_data.get("liquidity") == "maker",
                 )
             )
@@ -705,7 +705,7 @@ class KuCoinClient:
             Server timestamp
         """
         data = await self._request("GET", "/api/v1/timestamp", authenticated=False)
-        return datetime.fromtimestamp(data / 1000)
+        return datetime.fromtimestamp(data / 1000, UTC)
 
     async def get_symbols(self) -> list[dict[str, Any]]:
         """Get list of available trading symbols.
