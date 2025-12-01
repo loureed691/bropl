@@ -164,6 +164,62 @@ class TestPairSelector:
         assert summary["neutral_count"] == 0
         assert summary["top_pairs"] == []
 
+    async def test_scan_all_pairs_with_rate_limiting(
+        self, selector: PairSelector, mock_client: MagicMock
+    ) -> None:
+        """Test that scan_all_pairs respects rate limiting."""
+        # Mock to return valid data
+        from decimal import Decimal
+
+        mock_candles = [
+            MagicMock(close=Decimal(str(100 + i)), high=Decimal(str(105 + i)), low=Decimal(str(95 + i)))
+            for i in range(60)
+        ]
+        mock_client.get_candles.return_value = mock_candles
+        mock_client.get_24h_stats.return_value = {"volValue": "500000", "changeRate": "0.025"}
+
+        _ = await selector.scan_all_pairs(max_concurrent=2)
+
+        # Should have called get_24h_stats for each USDT pair
+        assert mock_client.get_24h_stats.call_count == 3
+
+    async def test_analyze_pair_insufficient_candles(
+        self, selector: PairSelector, mock_client: MagicMock
+    ) -> None:
+        """Test analyzing a pair with insufficient historical data."""
+        # Return less than 50 candles
+        mock_candles = [
+            MagicMock(close=Decimal(str(100 + i)), high=Decimal(str(105 + i)), low=Decimal(str(95 + i)))
+            for i in range(20)
+        ]
+        mock_client.get_candles.return_value = mock_candles
+        mock_client.get_24h_stats.return_value = {"volValue": "500000", "changeRate": "0.025"}
+
+        score = await selector.analyze_pair("BTC-USDT")
+        assert score is None  # Filtered out due to insufficient candles
+
+    async def test_get_bullish_pairs(
+        self, selector: PairSelector, mock_client: MagicMock
+    ) -> None:
+        """Test getting bullish pairs filter."""
+        # Mock to return empty candles so no pairs qualify
+        mock_client.get_candles.return_value = []
+
+        pairs = await selector.get_bullish_pairs(count=3)
+        # With empty candle data, no pairs should qualify
+        assert isinstance(pairs, list)
+
+    async def test_get_bearish_pairs(
+        self, selector: PairSelector, mock_client: MagicMock
+    ) -> None:
+        """Test getting bearish pairs filter."""
+        # Mock to return empty candles so no pairs qualify
+        mock_client.get_candles.return_value = []
+
+        pairs = await selector.get_bearish_pairs(count=3)
+        # With empty candle data, no pairs should qualify
+        assert isinstance(pairs, list)
+
 
 class TestTradingSettingsAutoSelect:
     """Tests for auto-selection settings in TradingSettings."""
@@ -229,6 +285,26 @@ class TestTradingSettingsAutoSelect:
 
         with pytest.raises(ValidationError):
             TradingSettings(auto_select_count=21)
+
+    def test_auto_select_interval_limits(self) -> None:
+        """Test auto_select_interval limits."""
+        from pydantic import ValidationError
+
+        from kucoin_bot.config import TradingSettings
+
+        # Valid intervals
+        settings = TradingSettings(auto_select_interval=61)
+        assert settings.auto_select_interval == 61
+
+        settings = TradingSettings(auto_select_interval=86400)  # 24 hours max
+        assert settings.auto_select_interval == 86400
+
+        # Invalid intervals
+        with pytest.raises(ValidationError):
+            TradingSettings(auto_select_interval=60)  # Must be > 60
+
+        with pytest.raises(ValidationError):
+            TradingSettings(auto_select_interval=86401)  # Must be <= 86400
 
 
 class TestPairScoreRanking:

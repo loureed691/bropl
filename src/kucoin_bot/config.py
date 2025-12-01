@@ -67,7 +67,7 @@ class TradingSettings(BaseSettings):
     # Auto-selection settings
     auto_select_pairs: Annotated[bool, Field(default=False, description="Enable auto-selection of best trading pairs")]
     auto_select_count: Annotated[int, Field(default=5, gt=0, le=20, description="Number of top pairs to auto-select")]
-    auto_select_interval: Annotated[int, Field(default=3600, gt=60, description="Pair scan interval in seconds")]
+    auto_select_interval: Annotated[int, Field(default=3600, gt=60, le=86400, description="Pair scan interval in seconds (60s - 24h)")]
     auto_select_min_volume: Annotated[float, Field(default=100000.0, gt=0, description="Minimum 24h volume for pair selection")]
     auto_select_min_signal: Annotated[float, Field(default=0.5, ge=0, le=1, description="Minimum signal strength for pair selection")]
     auto_select_signal_type: Annotated[str, Field(default="any", description="Signal type filter: any, bullish, or bearish")]

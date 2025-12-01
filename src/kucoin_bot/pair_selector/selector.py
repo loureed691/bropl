@@ -1,5 +1,6 @@
 """Pair selector for auto-selecting best USDT trading pairs with strongest signals."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -31,18 +32,34 @@ class PairScore:
         """Calculate a composite score for ranking pairs.
 
         Higher score = better trading opportunity.
+
+        Composite Score Weights Rationale:
+        - 60% signal strength: Primary factor for trading decision quality.
+          Strong technical signals indicate higher probability setups.
+        - 25% volume: Ensures sufficient liquidity for order execution.
+          Higher volume reduces slippage and provides more reliable price action.
+        - 15% volatility: Preference for moderate volatility (~3% daily range).
+          Too low = insufficient price movement for profits.
+          Too high = excessive risk and unpredictable moves.
         """
         # Base score from signal strength
         base_score = self.signal_strength
 
         # Volume factor (higher volume = more reliable signals)
-        # Normalize to a 0-1 scale assuming volume in millions
-        volume_factor = min(1.0, float(self.volume_24h) / 1_000_000)
+        # Normalize using 1M USDT as baseline for liquid pairs.
+        # This threshold represents typical high-volume altcoin trading activity.
+        volume_threshold = 1_000_000
+        volume_factor = min(1.0, float(self.volume_24h) / volume_threshold)
 
-        # Volatility factor (moderate volatility is preferred)
-        # Too low = no movement, too high = risky
-        volatility_factor = 1.0 - abs(self.volatility - 0.03) / 0.03 if self.volatility > 0 else 0.5
-        volatility_factor = max(0.0, min(1.0, volatility_factor))
+        # Volatility factor (moderate volatility ~3% is optimal)
+        # Penalize deviation from optimal, capped at 5% deviation for full penalty
+        if self.volatility > 0:
+            optimal_volatility = 0.03
+            max_deviation = 0.05
+            deviation = min(abs(self.volatility - optimal_volatility) / max_deviation, 1.0)
+            volatility_factor = 1.0 - deviation
+        else:
+            volatility_factor = 0.5
 
         # Weighted composite score
         return (base_score * 0.6) + (volume_factor * 0.25) + (volatility_factor * 0.15)
@@ -162,8 +179,16 @@ class PairSelector:
             self.logger.debug("Failed to analyze pair", symbol=symbol, error=str(e))
             return None
 
-    async def scan_all_pairs(self) -> list[PairScore]:
+    async def scan_all_pairs(
+        self,
+        max_concurrent: int = 5,
+    ) -> list[PairScore]:
         """Scan all USDT pairs and return sorted scores.
+
+        Uses parallel processing with rate limiting to avoid API throttling.
+
+        Args:
+            max_concurrent: Maximum number of concurrent API requests (default: 5)
 
         Returns:
             List of PairScore sorted by composite score (highest first)
@@ -175,19 +200,48 @@ class PairSelector:
             self.logger.warning("No USDT pairs found")
             return []
 
-        scores: list[PairScore] = []
+        total_pairs = len(usdt_pairs)
+        self.logger.info("Scanning pairs", total=total_pairs, max_concurrent=max_concurrent)
 
-        for symbol in usdt_pairs:
-            score = await self.analyze_pair(symbol)
-            if score and score.signal_strength >= self.min_signal_strength:
-                scores.append(score)
-                self.logger.debug(
-                    "Pair analyzed",
-                    symbol=symbol,
-                    signal_type=score.signal_type,
-                    strength=f"{score.signal_strength:.2f}",
-                    composite=f"{score.composite_score:.2f}",
-                )
+        scores: list[PairScore] = []
+        analyzed_count = 0
+
+        # Use semaphore to limit concurrent API calls
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def analyze_with_semaphore(symbol: str) -> PairScore | None:
+            async with semaphore:
+                # Small delay between API calls to avoid rate limiting
+                await asyncio.sleep(0.1)
+                return await self.analyze_pair(symbol)
+
+        # Process pairs in batches for progress logging
+        batch_size = 20
+        for i in range(0, total_pairs, batch_size):
+            batch = usdt_pairs[i : i + batch_size]
+            tasks = [analyze_with_semaphore(symbol) for symbol in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                analyzed_count += 1
+                if isinstance(result, PairScore) and result.signal_strength >= self.min_signal_strength:
+                    scores.append(result)
+                    self.logger.debug(
+                        "Pair analyzed",
+                        symbol=result.symbol,
+                        signal_type=result.signal_type,
+                        strength=f"{result.signal_strength:.2f}",
+                        composite=f"{result.composite_score:.2f}",
+                    )
+
+            # Log progress
+            self.logger.info(
+                "Scan progress",
+                analyzed=analyzed_count,
+                total=total_pairs,
+                qualifying=len(scores),
+                percent=f"{(analyzed_count / total_pairs) * 100:.1f}%",
+            )
 
         # Sort by composite score (highest first)
         scores.sort(key=lambda x: x.composite_score, reverse=True)

@@ -71,6 +71,9 @@ class TradingBot:
         self.latest_prices: dict[str, Decimal] = {}
         self.candle_buffers: dict[str, list[Candle]] = {}
 
+        # Lock for thread-safe trading pairs updates
+        self._pairs_lock = asyncio.Lock()
+
         # Task management
         self._tasks: list[asyncio.Task[Any]] = []
 
@@ -100,9 +103,11 @@ class TradingBot:
             if not await self.client.ping():
                 raise ConnectionError("Failed to connect to KuCoin API")
 
-            # Auto-select best trading pairs if enabled
+            # Start background pair selection if enabled (non-blocking)
+            # Bot will start with configured pairs and update once scan completes
             if self.pair_selector:
-                await self._auto_select_pairs()
+                self.logger.info("Starting background pair selection...")
+                asyncio.create_task(self._auto_select_pairs())
 
             # Get initial balances
             await self._update_portfolio()
@@ -178,39 +183,55 @@ class TradingBot:
 
         self.logger.info("Auto-selecting best trading pairs...")
 
-        signal_type = self.settings.trading.auto_select_signal_type
-        signal_type_filter = None if signal_type == "any" else signal_type
+        try:
+            signal_type = self.settings.trading.auto_select_signal_type
+            signal_type_filter = None if signal_type == "any" else signal_type
 
-        selected_pairs = await self.pair_selector.get_top_pairs(
-            signal_type=signal_type_filter,
-            count=self.settings.trading.auto_select_count,
-        )
-
-        if selected_pairs:
-            self.trading_pairs = selected_pairs
-            self.logger.info(
-                "Trading pairs auto-selected",
-                pairs=self.trading_pairs,
-                signal_type=signal_type,
+            selected_pairs = await self.pair_selector.get_top_pairs(
+                signal_type=signal_type_filter,
+                count=self.settings.trading.auto_select_count,
             )
 
-            # Log details of selected pairs
-            for pair in selected_pairs:
-                score = self.pair_selector.get_pair_details(pair)
-                if score:
-                    self.logger.info(
-                        "Selected pair details",
-                        symbol=pair,
-                        signal_type=score.signal_type,
-                        strength=f"{score.signal_strength:.3f}",
-                        composite_score=f"{score.composite_score:.3f}",
-                        volume_24h=str(score.volume_24h),
+            if selected_pairs:
+                async with self._pairs_lock:
+                    self.trading_pairs = selected_pairs
+                self.logger.info(
+                    "Trading pairs auto-selected",
+                    pairs=self.trading_pairs,
+                    signal_type=signal_type,
+                )
+
+                # Log details of selected pairs
+                for pair in selected_pairs:
+                    score = self.pair_selector.get_pair_details(pair)
+                    if score:
+                        self.logger.info(
+                            "Selected pair details",
+                            symbol=pair,
+                            signal_type=score.signal_type,
+                            strength=f"{score.signal_strength:.3f}",
+                            composite_score=f"{score.composite_score:.3f}",
+                            volume_24h=str(score.volume_24h),
+                        )
+            else:
+                # No pairs met selection criteria
+                fallback = self.settings.trading.get_pairs_list()
+                if fallback:
+                    async with self._pairs_lock:
+                        self.trading_pairs = fallback
+                    self.logger.warning(
+                        "No pairs met selection criteria, using configured fallback pairs",
+                        fallback_pairs=fallback,
                     )
-        else:
-            self.logger.warning(
-                "No pairs met selection criteria, using configured pairs",
-                fallback_pairs=self.settings.trading.get_pairs_list(),
-            )
+                else:
+                    async with self._pairs_lock:
+                        self.trading_pairs = []
+                    self.logger.error(
+                        "No pairs met selection criteria and no fallback configured. "
+                        "Bot will not trade until pairs are available."
+                    )
+        except Exception as e:
+            self.logger.error("Error during auto-selection", error=str(e))
 
     async def _pair_selection_loop(self) -> None:
         """Periodically re-scan and update trading pairs."""
@@ -236,8 +257,9 @@ class TradingBot:
 
                 if new_pairs and new_pairs != self.trading_pairs:
                     # Identify changes
-                    added = set(new_pairs) - set(self.trading_pairs)
-                    removed = set(self.trading_pairs) - set(new_pairs)
+                    async with self._pairs_lock:
+                        added = set(new_pairs) - set(self.trading_pairs)
+                        removed = set(self.trading_pairs) - set(new_pairs)
 
                     if added or removed:
                         self.logger.info(
@@ -247,12 +269,26 @@ class TradingBot:
                             new_pairs=new_pairs,
                         )
 
-                        # Unsubscribe from removed pairs
+                        # Check for open positions before removing pairs
+                        pairs_with_positions = []
                         for symbol in removed:
-                            await self._unsubscribe_pair(symbol)
+                            if symbol in self.risk_manager.positions:
+                                self.logger.warning(
+                                    "Cannot remove pair with open position, keeping it active",
+                                    symbol=symbol,
+                                    position_side=self.risk_manager.positions[symbol].side.value,
+                                )
+                                pairs_with_positions.append(symbol)
+                            else:
+                                await self._unsubscribe_pair(symbol)
 
-                        # Update trading pairs
-                        self.trading_pairs = new_pairs
+                        # Update removed set to exclude pairs with positions
+                        removed = removed - set(pairs_with_positions)
+
+                        # Update trading pairs atomically
+                        async with self._pairs_lock:
+                            # Keep pairs with open positions
+                            self.trading_pairs = list(set(new_pairs) | set(pairs_with_positions))
 
                         # Subscribe to new pairs
                         for symbol in added:
@@ -270,9 +306,18 @@ class TradingBot:
 
             except asyncio.CancelledError:
                 break
+            except (ConnectionError, TimeoutError) as e:
+                # Transient network errors - retry after delay
+                self.logger.warning("Temporary error in pair selection, will retry", error=str(e))
+                await asyncio.sleep(60)
             except Exception as e:
-                self.logger.error("Error in pair selection loop", error=str(e))
-                await asyncio.sleep(60)  # Wait before retry
+                # Unexpected errors - log and disable auto-selection
+                self.logger.error(
+                    "Fatal error in pair selection loop, disabling auto-selection",
+                    error=str(e),
+                )
+                self.pair_selector = None
+                break
 
     async def _subscribe_pair(self, symbol: str) -> None:
         """Subscribe to market data for a new pair.
@@ -315,6 +360,13 @@ class TradingBot:
             symbol: Trading pair symbol
         """
         try:
+            # Unsubscribe from WebSocket topics
+            ticker_topic = f"/market/ticker:{symbol}"
+            candles_topic = f"/market/candles:{symbol}_1hour"
+
+            await self.ws_manager.unsubscribe(ticker_topic)
+            await self.ws_manager.unsubscribe(candles_topic)
+
             # Clean up candle buffer
             if symbol in self.candle_buffers:
                 del self.candle_buffers[symbol]
