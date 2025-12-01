@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,7 @@ class TechnicalIndicators:
     """Collection of technical analysis indicators."""
 
     @staticmethod
-    def sma(data: Sequence[float], period: int) -> NDArray[np.float64]:
+    def sma(data: Sequence[float], period: int) -> NDArray[Any]:
         """Calculate Simple Moving Average.
 
         Args:
@@ -36,7 +37,7 @@ class TechnicalIndicators:
         return series.rolling(window=period).mean().to_numpy()
 
     @staticmethod
-    def ema(data: Sequence[float], period: int) -> NDArray[np.float64]:
+    def ema(data: Sequence[float], period: int) -> NDArray[Any]:
         """Calculate Exponential Moving Average.
 
         Args:
@@ -50,7 +51,7 @@ class TechnicalIndicators:
         return series.ewm(span=period, adjust=False).mean().to_numpy()
 
     @staticmethod
-    def rsi(data: Sequence[float], period: int = 14) -> NDArray[np.float64]:
+    def rsi(data: Sequence[float], period: int = 14) -> NDArray[Any]:
         """Calculate Relative Strength Index.
 
         Args:
@@ -77,7 +78,7 @@ class TechnicalIndicators:
         fast_period: int = 12,
         slow_period: int = 26,
         signal_period: int = 9,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[Any], NDArray[Any], NDArray[Any]]:
         """Calculate MACD (Moving Average Convergence Divergence).
 
         Args:
@@ -104,7 +105,7 @@ class TechnicalIndicators:
         data: Sequence[float],
         period: int = 20,
         std_dev: float = 2.0,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[Any], NDArray[Any], NDArray[Any]]:
         """Calculate Bollinger Bands.
 
         Args:
@@ -130,7 +131,7 @@ class TechnicalIndicators:
         low: Sequence[float],
         close: Sequence[float],
         period: int = 14,
-    ) -> NDArray[np.float64]:
+    ) -> NDArray[Any]:
         """Calculate Average True Range.
 
         Args:
@@ -162,7 +163,7 @@ class TechnicalIndicators:
         close: Sequence[float],
         k_period: int = 14,
         d_period: int = 3,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[Any], NDArray[Any]]:
         """Calculate Stochastic Oscillator.
 
         Args:
@@ -193,7 +194,7 @@ class TechnicalIndicators:
         low: Sequence[float],
         close: Sequence[float],
         period: int = 14,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[NDArray[Any], NDArray[Any], NDArray[Any]]:
         """Calculate Average Directional Index.
 
         Args:
@@ -238,7 +239,7 @@ class TechnicalIndicators:
         low: Sequence[float],
         close: Sequence[float],
         volume: Sequence[float],
-    ) -> NDArray[np.float64]:
+    ) -> NDArray[Any]:
         """Calculate Volume Weighted Average Price.
 
         Args:
@@ -256,11 +257,11 @@ class TechnicalIndicators:
         cumulative_tp_vol = np.cumsum(typical_price * vol)
         cumulative_vol = np.cumsum(vol)
 
-        vwap = cumulative_tp_vol / cumulative_vol
-        return vwap
+        result: NDArray[Any] = cumulative_tp_vol / cumulative_vol
+        return result
 
     @staticmethod
-    def obv(close: Sequence[float], volume: Sequence[float]) -> NDArray[np.float64]:
+    def obv(close: Sequence[float], volume: Sequence[float]) -> NDArray[Any]:
         """Calculate On-Balance Volume.
 
         Args:

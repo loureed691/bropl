@@ -279,11 +279,11 @@ class MarketDepth(BaseModel):
 
     def get_bid_depth(self, levels: int = 5) -> Decimal:
         """Calculate bid depth for given levels."""
-        return sum(size for _, size in self.bids[:levels])
+        return sum((size for _, size in self.bids[:levels]), Decimal("0"))
 
     def get_ask_depth(self, levels: int = 5) -> Decimal:
         """Calculate ask depth for given levels."""
-        return sum(size for _, size in self.asks[:levels])
+        return sum((size for _, size in self.asks[:levels]), Decimal("0"))
 
 
 class PerformanceMetrics(BaseModel):

@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import structlog
-from asyncio_throttle import Throttler
+from asyncio_throttle import Throttler  # type: ignore[attr-defined]
 
 from kucoin_bot.api.client import KuCoinAPIError, KuCoinClient
 from kucoin_bot.config import Settings

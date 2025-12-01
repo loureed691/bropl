@@ -65,7 +65,7 @@ def get_logger(name: str | None = None, **kwargs: Any) -> structlog.stdlib.Bound
     Returns:
         Configured logger instance
     """
-    log = structlog.get_logger(name)
+    log: structlog.stdlib.BoundLogger = structlog.get_logger(name)
     if kwargs:
         log = log.bind(**kwargs)
-    return log  # type: ignore[return-value]
+    return log

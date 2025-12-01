@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Annotated
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -114,9 +114,9 @@ class StrategySettings(BaseSettings):
 
     @field_validator("ema_long_period")
     @classmethod
-    def validate_ema_periods(cls, v: int, info) -> int:
+    def validate_ema_periods(cls, v: int, info: ValidationInfo) -> int:
         """Validate EMA periods - long must be greater than short."""
-        if "ema_short_period" in info.data and v <= info.data["ema_short_period"]:
+        if info.data and "ema_short_period" in info.data and v <= info.data["ema_short_period"]:
             raise ValueError("ema_long_period must be greater than ema_short_period")
         return v
 
@@ -147,10 +147,10 @@ class Settings(BaseSettings):
     )
 
     kucoin: KuCoinSettings = Field(default_factory=KuCoinSettings)
-    trading: TradingSettings = Field(default_factory=TradingSettings)
-    risk: RiskSettings = Field(default_factory=RiskSettings)
-    strategy: StrategySettings = Field(default_factory=StrategySettings)
-    app: AppSettings = Field(default_factory=AppSettings)
+    trading: TradingSettings = Field(default_factory=TradingSettings)  # type: ignore[arg-type]
+    risk: RiskSettings = Field(default_factory=RiskSettings)  # type: ignore[arg-type]
+    strategy: StrategySettings = Field(default_factory=StrategySettings)  # type: ignore[arg-type]
+    app: AppSettings = Field(default_factory=AppSettings)  # type: ignore[arg-type]
 
     @property
     def is_production(self) -> bool:

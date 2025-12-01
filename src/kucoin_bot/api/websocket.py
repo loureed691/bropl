@@ -12,7 +12,7 @@ import aiohttp
 import orjson
 import structlog
 import websockets
-from websockets import WebSocketClientProtocol
+from websockets import ClientConnection
 
 from kucoin_bot.config import Settings
 from kucoin_bot.models.data_models import Candle, MarketDepth, Ticker, Trade
@@ -34,7 +34,7 @@ class WebSocketManager:
         """
         self.settings = settings
         self.base_url = settings.base_url
-        self._ws: WebSocketClientProtocol | None = None
+        self._ws: ClientConnection | None = None
         self._running = False
         self._ping_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._receive_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -92,10 +92,11 @@ class WebSocketManager:
         endpoint = "/api/v1/bullet-private" if private else "/api/v1/bullet-public"
 
         async with aiohttp.ClientSession() as session, session.post(f"{self.base_url}{endpoint}") as response:
-            data = await response.json()
+            data: dict[str, Any] = await response.json()
             if data.get("code") != "200000":
                 raise ConnectionError(f"Failed to get WS token: {data.get('msg')}")
-            return data["data"]
+            result: dict[str, Any] = data["data"]
+            return result
 
     async def disconnect(self) -> None:
         """Close WebSocket connection."""
