@@ -463,7 +463,7 @@ class KuCoinClient:
             size=str(size),
         )
 
-        return Order(  # type: ignore[call-arg]
+        return Order(
             id=data.get("orderId"),
             client_order_id=client_order_id,
             symbol=symbol,
@@ -474,6 +474,9 @@ class KuCoinClient:
             stop_price=stop_price,
             time_in_force=time_in_force,
             status=OrderStatus.OPEN,
+            filled_size=Decimal("0"),
+            filled_price=None,
+            fee=Decimal("0"),
         )
 
     async def cancel_order(self, order_id: str) -> bool:

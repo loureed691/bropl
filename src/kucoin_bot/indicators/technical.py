@@ -257,8 +257,7 @@ class TechnicalIndicators:
         cumulative_tp_vol = np.cumsum(typical_price * vol)
         cumulative_vol = np.cumsum(vol)
 
-        vwap: NDArray[Any] = cumulative_tp_vol / cumulative_vol
-        return vwap
+        return cumulative_tp_vol / cumulative_vol  # type: ignore[no-any-return]
 
     @staticmethod
     def obv(close: Sequence[float], volume: Sequence[float]) -> NDArray[Any]:
