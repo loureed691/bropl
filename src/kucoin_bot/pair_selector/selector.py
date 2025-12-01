@@ -1,4 +1,4 @@
-"""Pair selector for auto-selecting best futures USDT pairs with strongest signals."""
+"""Pair selector for auto-selecting best USDT trading pairs with strongest signals."""
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -49,7 +49,7 @@ class PairScore:
 
 
 class PairSelector:
-    """Selects the best futures USDT trading pairs based on signal strength."""
+    """Selects the best USDT trading pairs based on signal strength."""
 
     def __init__(
         self,
@@ -76,7 +76,7 @@ class PairSelector:
         self._last_scan_time: datetime | None = None
 
     async def get_usdt_pairs(self) -> list[str]:
-        """Get all available futures USDT trading pairs.
+        """Get all available USDT trading pairs.
 
         Returns:
             List of trading pair symbols (e.g., ["BTC-USDT", "ETH-USDT"])
