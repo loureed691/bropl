@@ -117,6 +117,7 @@ cp .env.example .env
 | `AUTO_SELECT_MIN_VOLUME` | Minimum 24h volume for pair selection | `100000` |
 | `AUTO_SELECT_MIN_SIGNAL` | Minimum signal strength (0.0-1.0) | `0.5` |
 | `AUTO_SELECT_SIGNAL_TYPE` | Signal type filter: `any`, `bullish`, or `bearish` | `any` |
+| `AUTO_SELECT_STRATEGY` | Enable automatic strategy selection per pair | `false` |
 
 When `AUTO_SELECT_PAIRS` is enabled, the bot will:
 1. Scan all available USDT trading pairs on startup
@@ -124,6 +125,24 @@ When `AUTO_SELECT_PAIRS` is enabled, the bot will:
 3. Rank pairs by a composite score based on signal strength, volume, and volatility
 4. Select the top pairs with the strongest signals
 5. Periodically re-scan and update the selected pairs
+
+### Automatic Strategy Selection
+
+When `AUTO_SELECT_STRATEGY` is enabled (requires `AUTO_SELECT_PAIRS`), the bot automatically chooses the best strategy for each pair based on market conditions:
+
+| Market Condition | Recommended Strategy |
+|-----------------|---------------------|
+| Strong trend (bullish/bearish) + moderate volatility | `momentum` |
+| Neutral/weak signal + low volatility | `grid` |
+| High volume + moderate volatility + no strong trend | `scalping` |
+| Bear market or high volatility | `dca` |
+| Ranging market (neutral signal) | `mean_reversion` |
+
+The strategy selection logic considers:
+- **Signal Type**: Bullish, bearish, or neutral market conditions
+- **Signal Strength**: How strong the technical indicators are (0.0-1.0)
+- **Volatility**: Price movement range (low <2%, moderate 2-5%, high >5%)
+- **Volume**: 24-hour trading volume (high >1M USDT)
 
 ### Available Strategies
 
