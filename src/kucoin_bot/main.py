@@ -107,9 +107,19 @@ class TradingBot:
         Returns:
             Created strategy instance
         """
+        try:
+            strategy_enum = StrategyName(strategy_name)
+        except ValueError:
+            self.logger.warning(
+                "Invalid strategy name, using default momentum",
+                symbol=symbol,
+                invalid_strategy=strategy_name,
+            )
+            strategy_enum = StrategyName.MOMENTUM
+
         # Create settings with the specified strategy
         strategy_settings = StrategySettings(
-            strategy_name=StrategyName(strategy_name),
+            strategy_name=strategy_enum,
             rsi_period=self.settings.strategy.rsi_period,
             rsi_overbought=self.settings.strategy.rsi_overbought,
             rsi_oversold=self.settings.strategy.rsi_oversold,
@@ -122,7 +132,7 @@ class TradingBot:
         self.logger.info(
             "Created strategy for pair",
             symbol=symbol,
-            strategy=strategy_name,
+            strategy=strategy_enum.value,
         )
 
         return strategy
