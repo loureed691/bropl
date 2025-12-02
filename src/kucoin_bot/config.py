@@ -71,6 +71,7 @@ class TradingSettings(BaseSettings):
     auto_select_min_volume: Annotated[float, Field(default=100000.0, gt=0, description="Minimum 24h volume for pair selection")]
     auto_select_min_signal: Annotated[float, Field(default=0.5, ge=0, le=1, description="Minimum signal strength for pair selection")]
     auto_select_signal_type: Annotated[str, Field(default="any", description="Signal type filter: any, bullish, or bearish")]
+    auto_select_strategy: Annotated[bool, Field(default=False, description="Enable automatic strategy selection based on market conditions")]
 
     @field_validator("trading_pairs")
     @classmethod

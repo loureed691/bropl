@@ -14,6 +14,77 @@ from kucoin_bot.indicators.technical import SignalGenerator
 logger = structlog.get_logger()
 
 
+def select_best_strategy(
+    signal_type: str,
+    signal_strength: float,
+    volatility: float,
+    volume_24h: Decimal,
+) -> str:
+    """Select the best trading strategy based on market conditions.
+
+    Strategy Selection Logic:
+    - momentum: Best for trending markets (strong bullish/bearish signals, moderate volatility)
+    - mean_reversion: Best for ranging markets (neutral signals, low volatility)
+    - grid: Best for sideways markets with very low volatility
+    - scalping: Best for high volume, moderate volatility markets
+    - dca: Best for bear markets or high volatility (accumulation during dips)
+
+    Args:
+        signal_type: Type of signal ("bullish", "bearish", "neutral")
+        signal_strength: Strength of the signal (0.0 to 1.0)
+        volatility: Price volatility (0.0 to 1.0, typically 0.01-0.10)
+        volume_24h: 24-hour trading volume in USDT
+
+    Returns:
+        Name of the recommended strategy
+    """
+    # Volume threshold for high-volume consideration (1M USDT)
+    high_volume_threshold = 1_000_000
+    is_high_volume = float(volume_24h) >= high_volume_threshold
+
+    # Volatility thresholds
+    low_volatility = volatility < 0.02  # < 2% daily range
+    moderate_volatility = 0.02 <= volatility <= 0.05  # 2-5% daily range
+    high_volatility = volatility > 0.05  # > 5% daily range
+
+    # Strong signal indicates trending market
+    strong_signal = signal_strength >= 0.6
+    weak_signal = signal_strength < 0.4
+
+    # Bear market indicator (strong bearish or high volatility with weak bullish)
+    is_bear_market = (
+        signal_type == "bearish" and strong_signal
+    ) or (high_volatility and signal_type != "bullish")
+
+    # Strategy selection logic
+    # 1. High volatility, bearish or uncertain market -> DCA for accumulation
+    if is_bear_market or (high_volatility and weak_signal):
+        return "dca"
+
+    # 2. Strong trending market (bullish or bearish) with moderate volatility -> Momentum
+    if strong_signal and signal_type in ("bullish", "bearish") and moderate_volatility:
+        return "momentum"
+
+    # 3. High volume with moderate volatility -> Scalping for quick profits
+    if is_high_volume and moderate_volatility and not strong_signal:
+        return "scalping"
+
+    # 4. Neutral/weak signal with low volatility -> Grid trading
+    if (weak_signal or signal_type == "neutral") and low_volatility:
+        return "grid"
+
+    # 5. Default to mean reversion for ranging markets
+    if signal_type == "neutral" or (not strong_signal and not high_volatility):
+        return "mean_reversion"
+
+    # 6. Fallback to momentum for any other trending condition
+    if signal_type in ("bullish", "bearish"):
+        return "momentum"
+
+    # Default fallback
+    return "momentum"
+
+
 @dataclass
 class PairScore:
     """Represents the score of a trading pair based on signal strength."""
@@ -26,6 +97,7 @@ class PairScore:
     volatility: float
     indicators: dict[str, float] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    recommended_strategy: str = field(default="momentum")
 
     @property
     def composite_score(self) -> float:
@@ -165,6 +237,14 @@ class PairSelector:
                 name: result.value for name, result in signals.items()
             }
 
+            # Determine the best strategy for this pair based on market conditions
+            recommended_strategy = select_best_strategy(
+                signal_type=signal_type,
+                signal_strength=signal_strength,
+                volatility=volatility,
+                volume_24h=volume_24h,
+            )
+
             return PairScore(
                 symbol=symbol,
                 signal_type=signal_type,
@@ -173,6 +253,7 @@ class PairSelector:
                 price_change_24h=price_change_24h,
                 volatility=volatility,
                 indicators=indicators,
+                recommended_strategy=recommended_strategy,
             )
 
         except Exception as e:
@@ -365,6 +446,7 @@ class PairSelector:
                     "signal_type": s.signal_type,
                     "strength": round(s.signal_strength, 3),
                     "composite_score": round(s.composite_score, 3),
+                    "recommended_strategy": s.recommended_strategy,
                 }
                 for s in self._cached_scores[: self.top_pairs_count]
             ],

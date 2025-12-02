@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kucoin_bot.pair_selector.selector import PairScore, PairSelector
+from kucoin_bot.pair_selector.selector import PairScore, PairSelector, select_best_strategy
 
 
 class TestPairScore:
@@ -358,3 +358,136 @@ class TestPairScoreRanking:
         after = datetime.now(UTC)
 
         assert before <= score.timestamp <= after
+
+
+class TestSelectBestStrategy:
+    """Tests for automatic strategy selection based on market conditions."""
+
+    def test_bearish_high_volatility_returns_dca(self) -> None:
+        """Test that bear market with high volatility returns DCA strategy."""
+        strategy = select_best_strategy(
+            signal_type="bearish",
+            signal_strength=0.7,  # Strong signal
+            volatility=0.08,  # High volatility > 5%
+            volume_24h=Decimal("500000"),
+        )
+        assert strategy == "dca"
+
+    def test_high_volatility_weak_signal_returns_dca(self) -> None:
+        """Test that high volatility with weak signal returns DCA strategy."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.3,  # Weak signal
+            volatility=0.07,  # High volatility
+            volume_24h=Decimal("500000"),
+        )
+        assert strategy == "dca"
+
+    def test_strong_bullish_moderate_volatility_returns_momentum(self) -> None:
+        """Test that strong bullish signal with moderate volatility returns momentum."""
+        strategy = select_best_strategy(
+            signal_type="bullish",
+            signal_strength=0.7,  # Strong signal
+            volatility=0.03,  # Moderate volatility 2-5%
+            volume_24h=Decimal("500000"),
+        )
+        assert strategy == "momentum"
+
+    def test_strong_bearish_moderate_volatility_returns_dca(self) -> None:
+        """Test that strong bearish signal returns DCA (bear market condition)."""
+        strategy = select_best_strategy(
+            signal_type="bearish",
+            signal_strength=0.65,  # Strong signal >= 0.6
+            volatility=0.03,  # Moderate volatility
+            volume_24h=Decimal("500000"),
+        )
+        # Note: This will always return DCA since bearish + strong signal = bear market
+        assert strategy == "dca"
+
+    def test_high_volume_moderate_volatility_weak_signal_returns_scalping(self) -> None:
+        """Test that high volume with moderate volatility and weak signal returns scalping."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.4,  # Not strong signal (< 0.6)
+            volatility=0.035,  # Moderate volatility
+            volume_24h=Decimal("1500000"),  # High volume > 1M
+        )
+        assert strategy == "scalping"
+
+    def test_low_volatility_weak_signal_returns_grid(self) -> None:
+        """Test that low volatility with weak signal returns grid trading."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.3,  # Weak signal
+            volatility=0.015,  # Low volatility < 2%
+            volume_24h=Decimal("500000"),
+        )
+        assert strategy == "grid"
+
+    def test_neutral_signal_returns_mean_reversion(self) -> None:
+        """Test that neutral signal returns mean reversion strategy."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.45,  # Moderate signal
+            volatility=0.03,  # Moderate volatility
+            volume_24h=Decimal("500000"),  # Not high volume
+        )
+        assert strategy == "mean_reversion"
+
+    def test_bullish_low_volatility_returns_grid(self) -> None:
+        """Test that bullish with low volatility and not strong signal returns grid."""
+        strategy = select_best_strategy(
+            signal_type="bullish",
+            signal_strength=0.3,  # Weak signal (< 0.4)
+            volatility=0.01,  # Low volatility < 2%
+            volume_24h=Decimal("100000"),  # Low volume
+        )
+        # With weak signal and low volatility, should return grid
+        assert strategy == "grid"
+
+
+class TestPairScoreRecommendedStrategy:
+    """Tests for PairScore recommended_strategy field."""
+
+    def test_pair_score_with_recommended_strategy(self) -> None:
+        """Test creating a PairScore with recommended strategy."""
+        score = PairScore(
+            symbol="BTC-USDT",
+            signal_type="bullish",
+            signal_strength=0.8,
+            volume_24h=Decimal("1000000"),
+            price_change_24h=2.5,
+            volatility=0.03,
+            recommended_strategy="momentum",
+        )
+        assert score.recommended_strategy == "momentum"
+
+    def test_pair_score_default_recommended_strategy(self) -> None:
+        """Test that PairScore defaults to momentum strategy."""
+        score = PairScore(
+            symbol="BTC-USDT",
+            signal_type="bullish",
+            signal_strength=0.8,
+            volume_24h=Decimal("1000000"),
+            price_change_24h=2.5,
+            volatility=0.03,
+        )
+        assert score.recommended_strategy == "momentum"
+
+
+class TestTradingSettingsAutoSelectStrategy:
+    """Tests for auto_select_strategy setting."""
+
+    def test_default_auto_select_strategy_disabled(self) -> None:
+        """Test that auto_select_strategy is disabled by default."""
+        from kucoin_bot.config import TradingSettings
+
+        settings = TradingSettings()
+        assert settings.auto_select_strategy is False
+
+    def test_auto_select_strategy_enabled(self) -> None:
+        """Test enabling auto_select_strategy."""
+        from kucoin_bot.config import TradingSettings
+
+        settings = TradingSettings(auto_select_strategy=True)
+        assert settings.auto_select_strategy is True

@@ -11,7 +11,7 @@ import structlog
 
 from kucoin_bot.api.client import KuCoinClient
 from kucoin_bot.api.websocket import WebSocketManager
-from kucoin_bot.config import Settings, get_settings
+from kucoin_bot.config import Settings, StrategyName, StrategySettings, get_settings
 from kucoin_bot.execution.engine import ExecutionEngine
 from kucoin_bot.models.data_models import Candle, Ticker
 from kucoin_bot.pair_selector.selector import PairSelector
@@ -56,6 +56,10 @@ class TradingBot:
         )
         self.strategy: BaseStrategy = create_strategy(self.settings.strategy)
 
+        # Per-pair strategies for automatic strategy selection
+        self.pair_strategies: dict[str, BaseStrategy] = {}
+        self.auto_select_strategy_enabled = self.settings.trading.auto_select_strategy
+
         # Initialize pair selector for auto-selection
         self.pair_selector: PairSelector | None = None
         if self.settings.trading.auto_select_pairs:
@@ -77,6 +81,62 @@ class TradingBot:
         # Task management
         self._tasks: list[asyncio.Task[Any]] = []
 
+    def _get_strategy_for_pair(self, symbol: str) -> BaseStrategy:
+        """Get the strategy to use for a specific pair.
+
+        When auto_select_strategy is enabled, returns a per-pair strategy.
+        Otherwise, returns the global strategy.
+
+        Args:
+            symbol: Trading pair symbol
+
+        Returns:
+            Strategy instance for the pair
+        """
+        if self.auto_select_strategy_enabled and symbol in self.pair_strategies:
+            return self.pair_strategies[symbol]
+        return self.strategy
+
+    def _create_strategy_for_pair(self, symbol: str, strategy_name: str) -> BaseStrategy:
+        """Create and cache a strategy for a specific pair.
+
+        Args:
+            symbol: Trading pair symbol
+            strategy_name: Name of the strategy to create
+
+        Returns:
+            Created strategy instance
+        """
+        try:
+            strategy_enum = StrategyName(strategy_name)
+        except ValueError:
+            self.logger.warning(
+                "Invalid strategy name, using default momentum",
+                symbol=symbol,
+                invalid_strategy=strategy_name,
+            )
+            strategy_enum = StrategyName.MOMENTUM
+
+        # Create settings with the specified strategy
+        strategy_settings = StrategySettings(
+            strategy_name=strategy_enum,
+            rsi_period=self.settings.strategy.rsi_period,
+            rsi_overbought=self.settings.strategy.rsi_overbought,
+            rsi_oversold=self.settings.strategy.rsi_oversold,
+            ema_short_period=self.settings.strategy.ema_short_period,
+            ema_long_period=self.settings.strategy.ema_long_period,
+        )
+        strategy = create_strategy(strategy_settings)
+        self.pair_strategies[symbol] = strategy
+
+        self.logger.info(
+            "Created strategy for pair",
+            symbol=symbol,
+            strategy=strategy_enum.value,
+        )
+
+        return strategy
+
     async def start(self) -> None:
         """Start the trading bot."""
         self.logger.info(
@@ -85,6 +145,7 @@ class TradingBot:
             strategy=self.strategy.name,
             environment="sandbox" if self.settings.app.use_sandbox else "production",
             auto_select_enabled=self.settings.trading.auto_select_pairs,
+            auto_select_strategy=self.auto_select_strategy_enabled,
         )
 
         self._running = True
@@ -201,7 +262,7 @@ class TradingBot:
                     signal_type=signal_type,
                 )
 
-                # Log details of selected pairs
+                # Log details of selected pairs and assign strategies if enabled
                 for pair in selected_pairs:
                     score = self.pair_selector.get_pair_details(pair)
                     if score:
@@ -212,7 +273,16 @@ class TradingBot:
                             strength=f"{score.signal_strength:.3f}",
                             composite_score=f"{score.composite_score:.3f}",
                             volume_24h=str(score.volume_24h),
+                            recommended_strategy=score.recommended_strategy,
                         )
+
+                        # Create per-pair strategy if auto_select_strategy is enabled
+                        if self.auto_select_strategy_enabled:
+                            strategy = self._create_strategy_for_pair(pair, score.recommended_strategy)
+                            # Warm up strategy with existing candle data if available
+                            if pair in self.candle_buffers:
+                                for candle in self.candle_buffers[pair]:
+                                    strategy.update(pair, candle)
             else:
                 # No pairs met selection criteria
                 fallback = self.settings.trading.get_pairs_list()
@@ -290,8 +360,18 @@ class TradingBot:
                             # Keep pairs with open positions
                             self.trading_pairs = list(set(new_pairs) | set(pairs_with_positions))
 
-                        # Subscribe to new pairs
+                        # Subscribe to new pairs and assign strategies if enabled
                         for symbol in added:
+                            # Create per-pair strategy if auto_select_strategy is enabled
+                            if self.auto_select_strategy_enabled:
+                                score = self.pair_selector.get_pair_details(symbol)
+                                if score:
+                                    strategy = self._create_strategy_for_pair(symbol, score.recommended_strategy)
+                                    # Warm up with existing candle buffer data if available
+                                    if symbol in self.candle_buffers:
+                                        for candle in self.candle_buffers[symbol]:
+                                            strategy.update(symbol, candle)
+
                             await self._subscribe_pair(symbol)
 
                 # Log scan summary
@@ -333,9 +413,12 @@ class TradingBot:
             )
             self.candle_buffers[symbol] = candles
 
+            # Get the appropriate strategy for this pair
+            strategy = self._get_strategy_for_pair(symbol)
+
             # Warm up strategy
             for candle in candles:
-                self.strategy.update(symbol, candle)
+                strategy.update(symbol, candle)
 
             # Subscribe to real-time data
             await self.ws_manager.subscribe_ticker(
@@ -348,7 +431,11 @@ class TradingBot:
                 self._make_candle_callback(symbol),
             )
 
-            self.logger.info("Subscribed to new pair", symbol=symbol)
+            self.logger.info(
+                "Subscribed to new pair",
+                symbol=symbol,
+                strategy=strategy.name,
+            )
 
         except Exception as e:
             self.logger.error("Failed to subscribe to pair", symbol=symbol, error=str(e))
@@ -376,7 +463,12 @@ class TradingBot:
                 del self.latest_prices[symbol]
 
             # Reset strategy state for this symbol
-            self.strategy.reset(symbol)
+            strategy = self._get_strategy_for_pair(symbol)
+            strategy.reset(symbol)
+
+            # Clean up per-pair strategy if exists
+            if symbol in self.pair_strategies:
+                del self.pair_strategies[symbol]
 
             self.logger.info("Unsubscribed from pair", symbol=symbol)
 
@@ -396,14 +488,18 @@ class TradingBot:
 
                 self.candle_buffers[symbol] = candles
 
+                # Get the appropriate strategy for this pair
+                strategy = self._get_strategy_for_pair(symbol)
+
                 # Warm up strategy with historical data
                 for candle in candles:
-                    self.strategy.update(symbol, candle)
+                    strategy.update(symbol, candle)
 
                 self.logger.info(
                     "Historical data loaded",
                     symbol=symbol,
                     candles=len(candles),
+                    strategy=strategy.name,
                 )
 
             except Exception as e:
@@ -471,8 +567,11 @@ class TradingBot:
         if len(self.candle_buffers[symbol]) > max_candles:
             self.candle_buffers[symbol] = self.candle_buffers[symbol][-max_candles:]
 
+        # Get the appropriate strategy for this pair
+        strategy = self._get_strategy_for_pair(symbol)
+
         # Update strategy and check for signals
-        trading_signal = self.strategy.update(symbol, candle)
+        trading_signal = strategy.update(symbol, candle)
 
         # Record signal metrics
         metrics.record_signal(
@@ -701,6 +800,16 @@ class TradingBot:
         # Add pair selection info if enabled
         if self.pair_selector:
             status["pair_selection"] = self.pair_selector.get_scan_summary()
+
+        # Add per-pair strategy info if auto_select_strategy is enabled
+        if self.auto_select_strategy_enabled and self.pair_strategies:
+            status["auto_select_strategy"] = True
+            status["pair_strategies"] = {
+                symbol: strategy.name
+                for symbol, strategy in self.pair_strategies.items()
+            }
+        else:
+            status["auto_select_strategy"] = False
 
         return status
 
