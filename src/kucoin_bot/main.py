@@ -62,7 +62,7 @@ class TradingBot:
 
         # Initialize pair selector for auto-selection
         self.pair_selector: PairSelector | None = None
-        if self.settings.trading.auto_select_pairs or self.auto_select_strategy_enabled:
+        if self.settings.trading.auto_select_pairs:
             self.pair_selector = PairSelector(
                 client=self.client,
                 min_volume_24h=Decimal(str(self.settings.trading.auto_select_min_volume)),
@@ -278,7 +278,11 @@ class TradingBot:
 
                         # Create per-pair strategy if auto_select_strategy is enabled
                         if self.auto_select_strategy_enabled:
-                            self._create_strategy_for_pair(pair, score.recommended_strategy)
+                            strategy = self._create_strategy_for_pair(pair, score.recommended_strategy)
+                            # Warm up strategy with existing candle data if available
+                            if pair in self.candle_buffers:
+                                for candle in self.candle_buffers[pair]:
+                                    strategy.update(pair, candle)
             else:
                 # No pairs met selection criteria
                 fallback = self.settings.trading.get_pairs_list()
@@ -362,7 +366,11 @@ class TradingBot:
                             if self.auto_select_strategy_enabled:
                                 score = self.pair_selector.get_pair_details(symbol)
                                 if score:
-                                    self._create_strategy_for_pair(symbol, score.recommended_strategy)
+                                    strategy = self._create_strategy_for_pair(symbol, score.recommended_strategy)
+                                    # Warm up with existing candle buffer data if available
+                                    if symbol in self.candle_buffers:
+                                        for candle in self.candle_buffers[symbol]:
+                                            strategy.update(symbol, candle)
 
                             await self._subscribe_pair(symbol)
 

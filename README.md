@@ -128,7 +128,9 @@ When `AUTO_SELECT_PAIRS` is enabled, the bot will:
 
 ### Automatic Strategy Selection
 
-When `AUTO_SELECT_STRATEGY` is enabled (requires `AUTO_SELECT_PAIRS`), the bot automatically chooses the best strategy for each pair based on market conditions:
+When `AUTO_SELECT_STRATEGY` is enabled along with `AUTO_SELECT_PAIRS`, the bot automatically chooses the best strategy for each pair based on market conditions:
+
+> **Note:** `AUTO_SELECT_STRATEGY` only takes effect when `AUTO_SELECT_PAIRS` is also enabled. Without pair auto-selection, the bot uses the configured `STRATEGY_NAME` for all pairs.
 
 | Market Condition | Recommended Strategy |
 |-----------------|---------------------|

@@ -393,23 +393,22 @@ class TestSelectBestStrategy:
         )
         assert strategy == "momentum"
 
-    def test_strong_bearish_moderate_volatility_returns_momentum(self) -> None:
-        """Test that strong bearish signal with moderate volatility returns momentum."""
+    def test_strong_bearish_moderate_volatility_returns_dca(self) -> None:
+        """Test that strong bearish signal returns DCA (bear market condition)."""
         strategy = select_best_strategy(
             signal_type="bearish",
-            signal_strength=0.65,  # Strong signal but not bear market territory
+            signal_strength=0.65,  # Strong signal >= 0.6
             volatility=0.03,  # Moderate volatility
             volume_24h=Decimal("500000"),
         )
-        # Note: This may return DCA since bearish + strong signal = bear market
-        # Adjusting test to match actual logic
-        assert strategy in ("momentum", "dca")
+        # Note: This will always return DCA since bearish + strong signal = bear market
+        assert strategy == "dca"
 
     def test_high_volume_moderate_volatility_weak_signal_returns_scalping(self) -> None:
         """Test that high volume with moderate volatility and weak signal returns scalping."""
         strategy = select_best_strategy(
             signal_type="neutral",
-            signal_strength=0.4,  # Weak signal (< 0.6)
+            signal_strength=0.4,  # Not strong signal (< 0.6)
             volatility=0.035,  # Moderate volatility
             volume_24h=Decimal("1500000"),  # High volume > 1M
         )
@@ -435,16 +434,16 @@ class TestSelectBestStrategy:
         )
         assert strategy == "mean_reversion"
 
-    def test_bullish_no_high_volatility_returns_momentum_fallback(self) -> None:
-        """Test that bullish signal falls back to momentum."""
+    def test_bullish_low_volatility_returns_grid(self) -> None:
+        """Test that bullish with low volatility and not strong signal returns grid."""
         strategy = select_best_strategy(
             signal_type="bullish",
-            signal_strength=0.5,  # Not strong
-            volatility=0.01,  # Low volatility
+            signal_strength=0.3,  # Weak signal (< 0.4)
+            volatility=0.01,  # Low volatility < 2%
             volume_24h=Decimal("100000"),  # Low volume
         )
-        # Should fall through to momentum as last resort for bullish signal
-        assert strategy in ("momentum", "mean_reversion", "grid")
+        # With weak signal and low volatility, should return grid
+        assert strategy == "grid"
 
 
 class TestPairScoreRecommendedStrategy:
