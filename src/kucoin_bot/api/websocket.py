@@ -151,21 +151,49 @@ class WebSocketManager:
                 self.logger.error("Error receiving message", error=str(e))
 
     async def _handle_reconnect(self) -> None:
-        """Handle reconnection after connection loss."""
+        """Handle reconnection after connection loss with exponential backoff."""
         if not self._running:
             return
 
-        self.logger.info("Attempting to reconnect", delay=self._reconnect_delay)
-        await asyncio.sleep(self._reconnect_delay)
+        max_attempts = 10
+        attempt = 0
+        base_delay = self._reconnect_delay
 
-        try:
-            await self.connect()
-            # Resubscribe to previous topics
-            for topic in list(self._subscriptions):
-                await self._send_subscription(topic, True)
-        except Exception as e:
-            self.logger.error("Reconnection failed", error=str(e))
-            await self._handle_reconnect()
+        while self._running and attempt < max_attempts:
+            attempt += 1
+            delay = min(base_delay * (2 ** (attempt - 1)), 300)  # Cap at 5 minutes
+
+            self.logger.info(
+                "Attempting to reconnect",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                delay=delay,
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                await self.connect()
+                # Resubscribe to previous topics
+                for topic in list(self._subscriptions):
+                    await self._send_subscription(topic, True)
+
+                self.logger.info("Reconnection successful", attempt=attempt)
+                return
+
+            except Exception as e:
+                self.logger.error(
+                    "Reconnection attempt failed",
+                    attempt=attempt,
+                    error=str(e),
+                )
+
+        # Max attempts reached
+        if self._running:
+            self.logger.error(
+                "Failed to reconnect after maximum attempts",
+                max_attempts=max_attempts,
+            )
+            self._running = False
 
     async def _process_message(self, message: str | bytes) -> None:
         """Process incoming WebSocket message.

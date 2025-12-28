@@ -9,6 +9,7 @@ from typing import Any
 
 import structlog
 from asyncio_throttle import Throttler  # type: ignore[attr-defined]
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from kucoin_bot.api.client import KuCoinAPIError, KuCoinClient
 from kucoin_bot.config import Settings
@@ -50,6 +51,15 @@ class ExecutionEngine:
         self.pending_orders: dict[str, Order] = {}
         self.executed_orders: list[Order] = []
         self.logger = logger.bind(component="execution_engine")
+
+    def load_pending_orders(self, orders: dict[str, Order]) -> None:
+        """Load pending orders from persistent state.
+
+        Args:
+            orders: Dictionary of orders to load
+        """
+        self.pending_orders = orders
+        self.logger.info("Pending orders loaded from state", count=len(orders))
 
     async def execute_signal(
         self,
@@ -337,22 +347,60 @@ class ExecutionEngine:
 
         self.risk_manager.add_position(position)
 
-        # Place stop loss order
+        # Place stop loss order with retry logic
         if stop_loss:
             try:
-                sl_side = OrderSide.SELL if order.side == OrderSide.BUY else OrderSide.BUY
-                await self.place_stop_order(
-                    symbol=order.symbol,
-                    side=sl_side,
-                    size=order.filled_size,
-                    stop_price=stop_loss,
-                )
+                await self._place_stop_loss_with_retry(order, stop_loss)
             except KuCoinAPIError as e:
-                self.logger.error(
-                    "Failed to place stop loss",
+                # All retries failed - log critical alert
+                self.logger.critical(
+                    "CRITICAL: Failed to place stop loss after all retries - position is UNPROTECTED",
                     symbol=order.symbol,
+                    position_side=order.side.value,
+                    entry_price=str(order.filled_price),
+                    size=str(order.filled_size),
+                    stop_loss_price=str(stop_loss),
                     error=str(e),
                 )
+                # Position remains in risk_manager but without stop loss protection
+                # Consider manual intervention or emergency position closure
+
+    @retry(
+        retry=retry_if_exception_type(KuCoinAPIError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
+    )
+    async def _place_stop_loss_with_retry(self, order: Order, stop_loss: Decimal) -> None:
+        """Place stop loss order with automatic retry.
+
+        Args:
+            order: Executed entry order
+            stop_loss: Stop loss price
+
+        Raises:
+            KuCoinAPIError: If all retry attempts fail
+        """
+        try:
+            sl_side = OrderSide.SELL if order.side == OrderSide.BUY else OrderSide.BUY
+            await self.place_stop_order(
+                symbol=order.symbol,
+                side=sl_side,
+                size=order.filled_size,
+                stop_price=stop_loss,
+            )
+            self.logger.info(
+                "Stop loss placed successfully",
+                symbol=order.symbol,
+                stop_price=str(stop_loss),
+            )
+        except KuCoinAPIError as e:
+            self.logger.error(
+                "Failed to place stop loss (will retry)",
+                symbol=order.symbol,
+                error=str(e),
+            )
+            raise
 
     async def close_position(
         self,
@@ -464,17 +512,50 @@ class ExecutionEngine:
         return count
 
     async def sync_positions(self) -> None:
-        """Sync positions with exchange data."""
+        """Sync positions with exchange data.
+
+        Reconciles internal state with actual exchange balances and orders.
+        """
         try:
+            # Sync pending orders
             open_orders = await self.client.get_open_orders()
 
             for order in open_orders:
                 if order.client_order_id not in self.pending_orders:
                     self.pending_orders[order.client_order_id] = order
+                    self.logger.info(
+                        "Synced pending order from exchange",
+                        order_id=order.id,
+                        symbol=order.symbol,
+                    )
+
+            # Verify positions still have stop loss protection
+            # Build map of symbols to their stop loss orders
+            stop_loss_orders_by_symbol: dict[str, list[Order]] = {}
+            for order in open_orders:
+                if order.order_type in [OrderType.STOP, OrderType.STOP_LIMIT]:
+                    if order.symbol not in stop_loss_orders_by_symbol:
+                        stop_loss_orders_by_symbol[order.symbol] = []
+                    stop_loss_orders_by_symbol[order.symbol].append(order)
+
+            for symbol in list(self.risk_manager.positions.keys()):
+                position = self.risk_manager.positions[symbol]
+
+                # Check if position has a stop loss configured but no stop loss order on exchange
+                if position.stop_loss:
+                    sl_orders = stop_loss_orders_by_symbol.get(symbol, [])
+                    if not sl_orders:
+                        self.logger.warning(
+                            "Position missing stop loss order on exchange",
+                            symbol=symbol,
+                            position_side=position.side.value,
+                            expected_stop_loss=str(position.stop_loss),
+                        )
 
             self.logger.info(
                 "Positions synced",
                 pending_orders=len(self.pending_orders),
+                open_positions=len(self.risk_manager.positions),
             )
 
         except KuCoinAPIError as e:

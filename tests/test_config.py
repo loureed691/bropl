@@ -108,3 +108,28 @@ class TestSettings:
         settings.app.use_sandbox = False
         assert "sandbox" not in settings.base_url
         assert "sandbox" not in settings.ws_url
+
+def test_weights_validation_sum_to_one() -> None:
+    """Test that scoring weights are validated to sum to 1.0."""
+    from kucoin_bot.config import TradingSettings
+    
+    # Valid weights should work
+    settings = TradingSettings(
+        pair_score_signal_weight=0.6,
+        pair_score_volume_weight=0.25,
+        pair_score_volatility_weight=0.15,
+    )
+    assert settings.pair_score_signal_weight == 0.6
+    
+    # Invalid weights should fail
+    import pytest
+    from pydantic import ValidationError
+    
+    with pytest.raises(ValidationError) as exc_info:
+        TradingSettings(
+            pair_score_signal_weight=0.5,
+            pair_score_volume_weight=0.3,
+            pair_score_volatility_weight=0.3,  # Sum = 1.1
+        )
+    
+    assert "must sum to 1.0" in str(exc_info.value)

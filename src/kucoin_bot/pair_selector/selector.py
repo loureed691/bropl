@@ -99,28 +99,30 @@ class PairScore:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     recommended_strategy: str = field(default="momentum")
 
-    @property
-    def composite_score(self) -> float:
+    def calculate_composite_score(
+        self,
+        signal_weight: float = 0.6,
+        volume_weight: float = 0.25,
+        volatility_weight: float = 0.15,
+        volume_threshold: float = 1_000_000.0,
+    ) -> float:
         """Calculate a composite score for ranking pairs.
 
         Higher score = better trading opportunity.
 
-        Composite Score Weights Rationale:
-        - 60% signal strength: Primary factor for trading decision quality.
-          Strong technical signals indicate higher probability setups.
-        - 25% volume: Ensures sufficient liquidity for order execution.
-          Higher volume reduces slippage and provides more reliable price action.
-        - 15% volatility: Preference for moderate volatility (~3% daily range).
-          Too low = insufficient price movement for profits.
-          Too high = excessive risk and unpredictable moves.
+        Args:
+            signal_weight: Weight for signal strength (default: 0.6)
+            volume_weight: Weight for volume (default: 0.25)
+            volatility_weight: Weight for volatility (default: 0.15)
+            volume_threshold: Volume baseline for normalization (default: 1M USDT)
+
+        Returns:
+            Composite score from 0.0 to 1.0
         """
         # Base score from signal strength
         base_score = self.signal_strength
 
         # Volume factor (higher volume = more reliable signals)
-        # Normalize using 1M USDT as baseline for liquid pairs.
-        # This threshold represents typical high-volume altcoin trading activity.
-        volume_threshold = 1_000_000
         volume_factor = min(1.0, float(self.volume_24h) / volume_threshold)
 
         # Volatility factor (moderate volatility ~3% is optimal)
@@ -134,7 +136,16 @@ class PairScore:
             volatility_factor = 0.5
 
         # Weighted composite score
-        return (base_score * 0.6) + (volume_factor * 0.25) + (volatility_factor * 0.15)
+        return (
+            (base_score * signal_weight)
+            + (volume_factor * volume_weight)
+            + (volatility_factor * volatility_weight)
+        )
+
+    @property
+    def composite_score(self) -> float:
+        """Get composite score with default weights for backward compatibility."""
+        return self.calculate_composite_score()
 
 
 class PairSelector:
@@ -146,6 +157,10 @@ class PairSelector:
         min_volume_24h: Decimal = Decimal("100000"),
         min_signal_strength: float = 0.5,
         top_pairs_count: int = 5,
+        signal_weight: float = 0.6,
+        volume_weight: float = 0.25,
+        volatility_weight: float = 0.15,
+        volume_threshold: float = 1_000_000.0,
     ) -> None:
         """Initialize pair selector.
 
@@ -154,11 +169,19 @@ class PairSelector:
             min_volume_24h: Minimum 24h volume in USDT for filtering pairs
             min_signal_strength: Minimum signal strength to consider (0.0 to 1.0)
             top_pairs_count: Number of top pairs to select
+            signal_weight: Weight for signal strength in composite score
+            volume_weight: Weight for volume in composite score
+            volatility_weight: Weight for volatility in composite score
+            volume_threshold: Volume baseline for scoring normalization (USDT)
         """
         self.client = client
         self.min_volume_24h = min_volume_24h
         self.min_signal_strength = min_signal_strength
         self.top_pairs_count = top_pairs_count
+        self.signal_weight = signal_weight
+        self.volume_weight = volume_weight
+        self.volatility_weight = volatility_weight
+        self.volume_threshold = volume_threshold
         self.signal_generator = SignalGenerator()
         self.logger = logger.bind(component="pair_selector")
         self._cached_scores: list[PairScore] = []
@@ -324,8 +347,16 @@ class PairSelector:
                 percent=f"{(analyzed_count / total_pairs) * 100:.1f}%",
             )
 
-        # Sort by composite score (highest first)
-        scores.sort(key=lambda x: x.composite_score, reverse=True)
+        # Sort by composite score (highest first) using configured weights
+        scores.sort(
+            key=lambda x: x.calculate_composite_score(
+                self.signal_weight,
+                self.volume_weight,
+                self.volatility_weight,
+                self.volume_threshold,
+            ),
+            reverse=True,
+        )
 
         self._cached_scores = scores
         self._last_scan_time = datetime.now(UTC)

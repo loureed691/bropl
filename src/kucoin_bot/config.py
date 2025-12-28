@@ -73,6 +73,12 @@ class TradingSettings(BaseSettings):
     auto_select_signal_type: Annotated[str, Field(default="any", description="Signal type filter: any, bullish, or bearish")]
     auto_select_strategy: Annotated[bool, Field(default=False, description="Enable automatic strategy selection based on market conditions")]
 
+    # Pair scoring weights for composite score calculation
+    pair_score_signal_weight: Annotated[float, Field(default=0.6, ge=0, le=1, description="Weight for signal strength in composite score")]
+    pair_score_volume_weight: Annotated[float, Field(default=0.25, ge=0, le=1, description="Weight for volume in composite score")]
+    pair_score_volatility_weight: Annotated[float, Field(default=0.15, ge=0, le=1, description="Weight for volatility in composite score")]
+    pair_score_volume_threshold: Annotated[float, Field(default=1000000.0, gt=0, description="Volume baseline for scoring normalization (USDT)")]
+
     @field_validator("trading_pairs")
     @classmethod
     def validate_trading_pairs(cls, v: str) -> str:
@@ -91,6 +97,22 @@ class TradingSettings(BaseSettings):
         v = v.lower().strip()
         if v not in valid_types:
             raise ValueError(f"Invalid signal type: {v}. Must be one of: {valid_types}")
+        return v
+
+    @field_validator("pair_score_volatility_weight")
+    @classmethod
+    def validate_weights_sum(cls, v: float, info: ValidationInfo) -> float:
+        """Validate that scoring weights sum to approximately 1.0."""
+        if info.data:
+            signal_weight = info.data.get("pair_score_signal_weight", 0.6)
+            volume_weight = info.data.get("pair_score_volume_weight", 0.25)
+            volatility_weight = v
+            total = signal_weight + volume_weight + volatility_weight
+            if abs(total - 1.0) > 0.01:  # Allow small floating point error
+                raise ValueError(
+                    f"Scoring weights must sum to 1.0. Current sum: {total:.2f} "
+                    f"(signal={signal_weight}, volume={volume_weight}, volatility={volatility_weight})"
+                )
         return v
 
     def get_pairs_list(self) -> list[str]:

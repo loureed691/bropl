@@ -68,6 +68,10 @@ class TradingBot:
                 min_volume_24h=Decimal(str(self.settings.trading.auto_select_min_volume)),
                 min_signal_strength=self.settings.trading.auto_select_min_signal,
                 top_pairs_count=self.settings.trading.auto_select_count,
+                signal_weight=self.settings.trading.pair_score_signal_weight,
+                volume_weight=self.settings.trading.pair_score_volume_weight,
+                volatility_weight=self.settings.trading.pair_score_volatility_weight,
+                volume_threshold=self.settings.trading.pair_score_volume_threshold,
             )
 
         # Trading state
@@ -80,6 +84,7 @@ class TradingBot:
 
         # Task management
         self._tasks: list[asyncio.Task[Any]] = []
+        self._task_registry: dict[str, Callable[[], Any]] = {}
 
     def _get_strategy_for_pair(self, symbol: str) -> BaseStrategy:
         """Get the strategy to use for a specific pair.
@@ -164,6 +169,12 @@ class TradingBot:
             if not await self.client.ping():
                 raise ConnectionError("Failed to connect to KuCoin API")
 
+            # Load persistent state
+            await self._load_state()
+
+            # Reconcile loaded positions with actual exchange state
+            await self.execution_engine.sync_positions()
+
             # Start background pair selection if enabled (non-blocking)
             # Bot will start with configured pairs and update once scan completes
             if self.pair_selector:
@@ -190,21 +201,20 @@ class TradingBot:
             # Subscribe to market data
             await self._subscribe_market_data()
 
-            # Start main loops
-            self._tasks = [
-                asyncio.create_task(self._trading_loop()),
-                asyncio.create_task(self._monitoring_loop()),
-                asyncio.create_task(self._position_check_loop()),
-            ]
+            # Register task factories
+            self._task_registry = {
+                "trading_loop": self._trading_loop,
+                "monitoring_loop": self._monitoring_loop,
+                "position_check_loop": self._position_check_loop,
+                "state_save_loop": self._state_save_loop,
+            }
 
             # Add pair selection loop if auto-select is enabled
             if self.pair_selector:
-                self._tasks.append(asyncio.create_task(self._pair_selection_loop()))
+                self._task_registry["pair_selection_loop"] = self._pair_selection_loop
 
-            self.logger.info("Trading bot started successfully")
-
-            # Wait for tasks
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+            # Start task supervisor
+            await self._task_supervisor()
 
         except Exception as e:
             self.logger.error("Bot startup failed", error=str(e))
@@ -219,6 +229,9 @@ class TradingBot:
 
         self.logger.info("Stopping trading bot...")
         self._running = False
+
+        # Save state before shutdown
+        await self._save_state()
 
         # Cancel running tasks
         for task in self._tasks:
@@ -742,6 +755,108 @@ class TradingBot:
 
         except Exception as e:
             self.logger.error("Failed to update portfolio", error=str(e))
+
+    async def _load_state(self) -> None:
+        """Load persistent state from disk."""
+        from kucoin_bot.persistence import StateManager
+
+        try:
+            state_manager = StateManager()
+            positions, pending_orders = state_manager.load_state()
+
+            # Load positions into risk manager
+            self.risk_manager.load_positions(positions)
+
+            # Load pending orders into execution engine
+            self.execution_engine.load_pending_orders(pending_orders)
+
+            self.logger.info(
+                "State loaded successfully",
+                positions=len(positions),
+                pending_orders=len(pending_orders),
+            )
+
+        except Exception as e:
+            self.logger.error("Failed to load state", error=str(e))
+
+    async def _save_state(self) -> None:
+        """Save persistent state to disk."""
+        from kucoin_bot.persistence import StateManager
+
+        try:
+            state_manager = StateManager()
+            state_manager.save_state(
+                positions=self.risk_manager.positions,
+                pending_orders=self.execution_engine.pending_orders,
+            )
+        except Exception as e:
+            self.logger.error("Failed to save state", error=str(e))
+
+    async def _state_save_loop(self) -> None:
+        """Periodically save state to disk."""
+        while self._running:
+            try:
+                await asyncio.sleep(60)  # Save every minute
+                await self._save_state()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in state save loop", error=str(e))
+                await asyncio.sleep(30)
+
+    async def _task_supervisor(self) -> None:
+        """Supervise tasks and restart them if they fail."""
+        # Start all tasks
+        for task_name, task_factory in self._task_registry.items():
+            task = asyncio.create_task(task_factory(), name=task_name)
+            self._tasks.append(task)
+
+        self.logger.info("All tasks started", task_count=len(self._tasks))
+
+        # Monitor tasks
+        while self._running:
+            try:
+                # Check for completed/failed tasks - collect all done tasks first
+                done_tasks = [
+                    (i, task)
+                    for i, task in enumerate(self._tasks)
+                    if task.done()
+                ]
+
+                for i, task in done_tasks:
+                    task_name = task.get_name()
+
+                    # Check if task failed
+                    try:
+                        exception = task.exception()
+                        if exception:
+                            self.logger.error(
+                                "Task failed with exception",
+                                task_name=task_name,
+                                error=str(exception),
+                            )
+                    except asyncio.CancelledError:
+                        self.logger.info("Task was cancelled", task_name=task_name)
+                        continue
+
+                    # Restart the task if it's in the registry and bot is still running
+                    if task_name in self._task_registry and self._running:
+                        self.logger.warning(
+                            "Restarting failed task",
+                            task_name=task_name,
+                        )
+                        task_factory = self._task_registry[task_name]
+                        new_task = asyncio.create_task(task_factory(), name=task_name)
+                        self._tasks[i] = new_task
+
+                await asyncio.sleep(5)  # Check every 5 seconds
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error("Error in task supervisor", error=str(e))
+                await asyncio.sleep(10)
 
     async def manual_trade(
         self,
