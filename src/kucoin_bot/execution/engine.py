@@ -345,12 +345,14 @@ class ExecutionEngine:
             if use_websocket:
                 try:
                     # Wait for WebSocket update with short timeout
-                    event = self._ws_order_events.get(order.id or order.client_order_id)
+                    # Prefer order.id but use client_order_id if id is None
+                    order_key = order.id if order.id is not None else order.client_order_id
+                    event = self._ws_order_events.get(order_key)
                     if event:
                         await asyncio.wait_for(event.wait(), timeout=1.0)
 
                         # Get the update data
-                        ws_data = self._ws_order_data.get(order.id or order.client_order_id)
+                        ws_data = self._ws_order_data.get(order_key)
                         if ws_data:
                             update_type = ws_data.get("type", "")
                             ws_status = ws_data.get("status", "")
@@ -360,8 +362,13 @@ class ExecutionEngine:
                                 # Order is fully filled
                                 order.status = OrderStatus.FILLED
                                 order.filled_size = Decimal(str(ws_data.get("filledSize", "0")))
-                                order.filled_price = Decimal(str(ws_data.get("matchPrice",
-                                    ws_data.get("price", "0"))))
+
+                                # Get fill price, preferring matchPrice over order price
+                                match_price = ws_data.get("matchPrice")
+                                price = ws_data.get("price")
+                                fill_price = match_price if match_price is not None else price
+                                order.filled_price = Decimal(str(fill_price or "0"))
+
                                 order.fee = Decimal("0")  # Fee info may need separate query
                                 order.updated_at = datetime.now(UTC)
 

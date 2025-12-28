@@ -1,7 +1,6 @@
 """Tests for WebSocket-based order tracking functionality."""
 
 import asyncio
-from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -249,7 +248,7 @@ class TestOrderTrackingWithWebSocket:
 
         call_count = 0
 
-        async def delayed_response(*args, **kwargs):
+        async def delayed_response(*_args, **_kwargs):  # noqa: ARG001
             nonlocal call_count
             call_count += 1
             if call_count >= 2:  # Return filled order on second call
@@ -341,7 +340,7 @@ class TestWebSocketAuthentication:
             call_args = mock_session.post.call_args
 
             # Verify authentication headers were included
-            if len(call_args[1]) > 0 and "headers" in call_args[1]:
+            if "headers" in call_args[1]:
                 headers = call_args[1]["headers"]
                 assert "KC-API-KEY" in headers
                 assert "KC-API-SIGN" in headers
