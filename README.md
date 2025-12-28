@@ -7,6 +7,7 @@ A sophisticated, production-ready cryptocurrency trading bot for KuCoin exchange
 ### 🚀 Core Capabilities
 
 - **Async Architecture**: Built entirely on asyncio for high-performance, non-blocking operations
+- **Real-time Order Tracking**: WebSocket-based order execution monitoring with polling fallback
 - **Auto-Selection of Best Trading Pairs**: Automatically scans and selects USDT pairs with the strongest signals
 - **Multiple Trading Strategies**: 
   - Momentum Trading (RSI + EMA crossovers + MACD)
@@ -14,6 +15,16 @@ A sophisticated, production-ready cryptocurrency trading bot for KuCoin exchange
   - Grid Trading (for ranging markets)
   - Scalping (high-frequency short-term trades)
   - DCA (Dollar Cost Averaging for accumulation)
+
+### ⚡ Real-time Order Execution Tracking
+
+The bot uses KuCoin's private WebSocket channel (`/spotMarket/tradeOrders`) for real-time order execution updates:
+
+- **Instant Notifications**: Receive immediate updates when orders are filled, partially filled, or canceled
+- **No Timeout Limitations**: Unlike polling-based tracking, WebSocket updates ensure orders are tracked regardless of fill time
+- **Graceful Fallback**: Automatically falls back to REST API polling if WebSocket connection is unavailable
+- **Dual Connection**: Maintains separate WebSocket connections for public market data and private order updates
+- **Reliable Tracking**: Orders remain monitored even if they take longer than 30 seconds to fill
 
 ### 🔍 Auto Pair Selection
 
@@ -247,6 +258,71 @@ The bot exposes Prometheus metrics on port 8000:
 - `trading_bot_open_positions`: Number of open positions
 - `trading_bot_unrealized_pnl_usdt`: Unrealized P&L
 - `trading_bot_win_rate`: Win rate
+- `trading_bot_drawdown_percent`: Current drawdown
+
+## Architecture & Technical Details
+
+### WebSocket-Based Order Tracking
+
+The bot implements a hybrid approach to order execution monitoring:
+
+#### Primary: Real-time WebSocket Updates
+- Connects to KuCoin's private WebSocket channel `/spotMarket/tradeOrders`
+- Receives instant notifications for all order state changes:
+  - `open`: Order enters the order book
+  - `match`: Order partially or fully executed
+  - `filled`: Order completely filled
+  - `canceled`: Order canceled
+  - `update`: Order modified
+- Eliminates the 30-second timeout limitation of polling-only approaches
+- Reduces API rate limit usage
+
+#### Fallback: REST API Polling
+- Automatically used when WebSocket connection is unavailable
+- Polls order status every 0.5 seconds
+- Maintains backward compatibility
+- Ensures reliability even during network issues
+
+#### Implementation Details
+
+The `ExecutionEngine` maintains two tracking mechanisms:
+```python
+# WebSocket event signaling
+self._ws_order_events: dict[str, asyncio.Event] = {}
+
+# Order data from WebSocket updates  
+self._ws_order_data: dict[str, dict[str, Any]] = {}
+```
+
+When tracking an order:
+1. Create an asyncio.Event for the order ID
+2. Wait for WebSocket update with 1-second timeout
+3. If WebSocket update received, process immediately
+4. If timeout, fall back to REST API polling
+5. Clean up tracking data when order completes
+
+### Dual WebSocket Architecture
+
+The bot maintains two separate WebSocket connections:
+
+1. **Public Connection** (`ws_manager`)
+   - Market data (tickers, candles, order book)
+   - No authentication required
+   - Shared across all trading pairs
+
+2. **Private Connection** (`ws_manager_private`)
+   - Order execution updates
+   - Requires API key authentication
+   - Account-specific data
+
+This separation ensures market data streaming continues uninterrupted even if private channel authentication fails.
+
+### Error Handling & Resilience
+
+- **Graceful Degradation**: If private WebSocket fails, bot continues with polling-only tracking
+- **Automatic Reconnection**: WebSocket manager implements exponential backoff (max 10 attempts)
+- **State Persistence**: Orders remain in `pending_orders` after timeout for later reconciliation
+- **Position Sync**: Regular `sync_positions()` call ensures consistency with exchange state
 - `trading_bot_drawdown_percent`: Current drawdown
 
 ## ⚠️ Disclaimer

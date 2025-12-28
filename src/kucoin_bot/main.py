@@ -44,7 +44,8 @@ class TradingBot:
 
         # Initialize components
         self.client = KuCoinClient(self.settings)
-        self.ws_manager = WebSocketManager(self.settings)
+        self.ws_manager = WebSocketManager(self.settings)  # Public market data
+        self.ws_manager_private: WebSocketManager | None = None  # Private order updates
         self.risk_manager = RiskManager(
             self.settings.risk,
             self.settings.trading,
@@ -53,6 +54,7 @@ class TradingBot:
             self.client,
             self.risk_manager,
             self.settings,
+            self.ws_manager,  # Pass WebSocket manager for real-time order tracking
         )
         self.strategy: BaseStrategy = create_strategy(self.settings.strategy)
 
@@ -195,11 +197,33 @@ class TradingBot:
             # Load historical data
             await self._load_historical_data()
 
-            # Connect WebSocket
-            await self.ws_manager.connect()
+            # Connect WebSocket for market data (public)
+            await self.ws_manager.connect(private=False)
 
             # Subscribe to market data
             await self._subscribe_market_data()
+
+            # Connect to private WebSocket for order updates
+            # Note: KuCoin requires separate connections for public and private channels
+            try:
+                from kucoin_bot.api.websocket import WebSocketManager
+
+                # Create a separate WebSocket manager for private channels
+                self.ws_manager_private = WebSocketManager(self.settings)
+                await self.ws_manager_private.connect(private=True)
+
+                # Update execution engine with private WebSocket manager
+                self.execution_engine.ws_manager = self.ws_manager_private
+
+                # Set up order tracking via WebSocket
+                await self.execution_engine.setup_order_tracking()
+
+                self.logger.info("Private WebSocket connection established for order tracking")
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to establish private WebSocket connection, order tracking will use polling only",
+                    error=str(e),
+                )
 
             # Register task factories
             self._task_registry = {
@@ -244,6 +268,10 @@ class TradingBot:
 
         # Disconnect WebSocket
         await self.ws_manager.disconnect()
+
+        # Disconnect private WebSocket if connected
+        if self.ws_manager_private:
+            await self.ws_manager_private.disconnect()
 
         # Close API client
         await self.client.close()
