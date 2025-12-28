@@ -111,7 +111,6 @@ class StateManager:
                 "take_profit": str(pos.take_profit) if pos.take_profit else None,
                 "order_ids": pos.order_ids,
                 "opened_at": pos.opened_at.isoformat(),
-                "updated_at": pos.updated_at.isoformat() if pos.updated_at else None,
             }
             for symbol, pos in positions.items()
         }
@@ -140,11 +139,6 @@ class StateManager:
                     ),
                     order_ids=pos_data.get("order_ids", []),
                     opened_at=datetime.fromisoformat(pos_data["opened_at"]),
-                    updated_at=(
-                        datetime.fromisoformat(pos_data["updated_at"])
-                        if pos_data.get("updated_at")
-                        else None
-                    ),
                 )
             except Exception as e:
                 self.logger.warning("Failed to deserialize position", symbol=symbol, error=str(e))
