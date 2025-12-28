@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Validation script to demonstrate the critical bug fixes."""
 
-import asyncio
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -9,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from kucoin_bot.config import RiskSettings, TradingSettings
-from kucoin_bot.models.data_models import Order, OrderSide, OrderStatus, OrderType, Position
+from kucoin_bot.models.data_models import Order, OrderSide, Position
 from kucoin_bot.persistence import StateManager
 from kucoin_bot.risk_management.manager import RiskManager
 
@@ -18,9 +17,9 @@ def test_state_persistence():
     """Test that state persistence works correctly."""
     print("\n=== Testing State Persistence ===")
 
-    # Create a temporary state file
-    state_file = "/tmp/test_bot_state.json"
-    manager = StateManager(state_file)
+    # Create a temporary state file in a cross-platform way
+    state_file = Path.cwd() / "test_bot_state.json"
+    manager = StateManager(str(state_file))
 
     # Create test data
     position = Position(
@@ -79,7 +78,7 @@ def test_websocket_reconnection():
 
     # Read the websocket.py file
     websocket_file = Path(__file__).parent.parent / "src/kucoin_bot/api/websocket.py"
-    with open(websocket_file, "r") as f:
+    with open(websocket_file) as f:
         content = f.read()
 
     # Check that _handle_reconnect uses while loop
@@ -104,7 +103,7 @@ def test_stop_loss_retry():
 
     # Read the engine.py file
     engine_file = Path(__file__).parent.parent / "src/kucoin_bot/execution/engine.py"
-    with open(engine_file, "r") as f:
+    with open(engine_file) as f:
         content = f.read()
 
     # Check for retry decorator
@@ -131,7 +130,7 @@ def test_task_supervisor():
 
     # Read the main.py file
     main_file = Path(__file__).parent.parent / "src/kucoin_bot/main.py"
-    with open(main_file, "r") as f:
+    with open(main_file) as f:
         content = f.read()
 
     # Check for task supervisor method
@@ -160,7 +159,7 @@ def test_configurable_scoring():
 
     # Read the config.py file
     config_file = Path(__file__).parent.parent / "src/kucoin_bot/config.py"
-    with open(config_file, "r") as f:
+    with open(config_file) as f:
         content = f.read()
 
     # Check for scoring weight config fields
@@ -178,7 +177,7 @@ def test_configurable_scoring():
 
     # Read the selector.py file
     selector_file = Path(__file__).parent.parent / "src/kucoin_bot/pair_selector/selector.py"
-    with open(selector_file, "r") as f:
+    with open(selector_file) as f:
         content = f.read()
 
     # Check that PairSelector accepts weights as parameters

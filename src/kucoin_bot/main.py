@@ -172,6 +172,9 @@ class TradingBot:
             # Load persistent state
             await self._load_state()
 
+            # Reconcile loaded positions with actual exchange state
+            await self.execution_engine.sync_positions()
+
             # Start background pair selection if enabled (non-blocking)
             # Bot will start with configured pairs and update once scan completes
             if self.pair_selector:
@@ -814,33 +817,38 @@ class TradingBot:
         # Monitor tasks
         while self._running:
             try:
-                # Check for completed/failed tasks
-                for i, task in enumerate(self._tasks):
-                    if task.done():
-                        task_name = task.get_name()
+                # Check for completed/failed tasks - collect all done tasks first
+                done_tasks = [
+                    (i, task)
+                    for i, task in enumerate(self._tasks)
+                    if task.done()
+                ]
 
-                        # Check if task failed
-                        try:
-                            exception = task.exception()
-                            if exception:
-                                self.logger.error(
-                                    "Task failed with exception",
-                                    task_name=task_name,
-                                    error=str(exception),
-                                )
-                        except asyncio.CancelledError:
-                            self.logger.info("Task was cancelled", task_name=task_name)
-                            continue
+                for i, task in done_tasks:
+                    task_name = task.get_name()
 
-                        # Restart the task if it's in the registry and bot is still running
-                        if task_name in self._task_registry and self._running:
-                            self.logger.warning(
-                                "Restarting failed task",
+                    # Check if task failed
+                    try:
+                        exception = task.exception()
+                        if exception:
+                            self.logger.error(
+                                "Task failed with exception",
                                 task_name=task_name,
+                                error=str(exception),
                             )
-                            task_factory = self._task_registry[task_name]
-                            new_task = asyncio.create_task(task_factory(), name=task_name)
-                            self._tasks[i] = new_task
+                    except asyncio.CancelledError:
+                        self.logger.info("Task was cancelled", task_name=task_name)
+                        continue
+
+                    # Restart the task if it's in the registry and bot is still running
+                    if task_name in self._task_registry and self._running:
+                        self.logger.warning(
+                            "Restarting failed task",
+                            task_name=task_name,
+                        )
+                        task_factory = self._task_registry[task_name]
+                        new_task = asyncio.create_task(task_factory(), name=task_name)
+                        self._tasks[i] = new_task
 
                 await asyncio.sleep(5)  # Check every 5 seconds
 

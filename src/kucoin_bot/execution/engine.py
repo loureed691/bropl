@@ -349,7 +349,21 @@ class ExecutionEngine:
 
         # Place stop loss order with retry logic
         if stop_loss:
-            await self._place_stop_loss_with_retry(order, stop_loss)
+            try:
+                await self._place_stop_loss_with_retry(order, stop_loss)
+            except KuCoinAPIError as e:
+                # All retries failed - log critical alert
+                self.logger.critical(
+                    "CRITICAL: Failed to place stop loss after all retries - position is UNPROTECTED",
+                    symbol=order.symbol,
+                    position_side=order.side.value,
+                    entry_price=str(order.filled_price),
+                    size=str(order.filled_size),
+                    stop_loss_price=str(stop_loss),
+                    error=str(e),
+                )
+                # Position remains in risk_manager but without stop loss protection
+                # Consider manual intervention or emergency position closure
 
     @retry(
         retry=retry_if_exception_type(KuCoinAPIError),
@@ -515,20 +529,28 @@ class ExecutionEngine:
                         symbol=order.symbol,
                     )
 
-            # Verify positions still match open orders
-            # Remove positions that have no corresponding stop loss orders if they should have one
-            symbols_with_orders = {order.symbol for order in open_orders}
+            # Verify positions still have stop loss protection
+            # Build map of symbols to their stop loss orders
+            stop_loss_orders_by_symbol: dict[str, list[Order]] = {}
+            for order in open_orders:
+                if order.order_type in [OrderType.STOP, OrderType.STOP_LIMIT]:
+                    if order.symbol not in stop_loss_orders_by_symbol:
+                        stop_loss_orders_by_symbol[order.symbol] = []
+                    stop_loss_orders_by_symbol[order.symbol].append(order)
 
             for symbol in list(self.risk_manager.positions.keys()):
                 position = self.risk_manager.positions[symbol]
 
-                # Check if position still has protection orders
-                if position.stop_loss and symbol not in symbols_with_orders:
-                    self.logger.warning(
-                        "Position missing stop loss order on exchange",
-                        symbol=symbol,
-                        position_side=position.side.value,
-                    )
+                # Check if position has a stop loss configured but no stop loss order on exchange
+                if position.stop_loss:
+                    sl_orders = stop_loss_orders_by_symbol.get(symbol, [])
+                    if not sl_orders:
+                        self.logger.warning(
+                            "Position missing stop loss order on exchange",
+                            symbol=symbol,
+                            position_side=position.side.value,
+                            expected_stop_loss=str(position.stop_loss),
+                        )
 
             self.logger.info(
                 "Positions synced",

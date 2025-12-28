@@ -99,6 +99,22 @@ class TradingSettings(BaseSettings):
             raise ValueError(f"Invalid signal type: {v}. Must be one of: {valid_types}")
         return v
 
+    @field_validator("pair_score_volatility_weight")
+    @classmethod
+    def validate_weights_sum(cls, v: float, info: ValidationInfo) -> float:
+        """Validate that scoring weights sum to approximately 1.0."""
+        if info.data:
+            signal_weight = info.data.get("pair_score_signal_weight", 0.6)
+            volume_weight = info.data.get("pair_score_volume_weight", 0.25)
+            volatility_weight = v
+            total = signal_weight + volume_weight + volatility_weight
+            if abs(total - 1.0) > 0.01:  # Allow small floating point error
+                raise ValueError(
+                    f"Scoring weights must sum to 1.0. Current sum: {total:.2f} "
+                    f"(signal={signal_weight}, volume={volume_weight}, volatility={volatility_weight})"
+                )
+        return v
+
     def get_pairs_list(self) -> list[str]:
         """Return trading pairs as a list."""
         return [p.strip() for p in self.trading_pairs.split(",")]
