@@ -275,6 +275,43 @@ class RiskManager:
 
         return max(Decimal("0"), final_size)
 
+    def calculate_smart_leverage(self, signal: TradingSignal) -> int:
+        """
+        Calculate smart leverage based on Confidence and Volatility.
+        High Confidence + Low Volatility = High Leverage
+        Low Confidence + High Volatility = Low Leverage
+        """
+        # Base leverage settings (configurable via risk settings)
+        MAX_LEVERAGE = self.risk_settings.max_leverage
+        TARGET_RISK = self.risk_settings.target_risk_percent / 100
+        AGGRESSION_MULTIPLIER = self.risk_settings.leverage_aggression_multiplier
+
+        if signal.volatility <= 0:
+            return 1
+
+        # Kelly-like sizing for leverage
+        # If volatility is 1% (0.01), and we want to risk 2%, raw leverage could be 2.
+        # We scale this by signal confidence.
+
+        raw_leverage = (TARGET_RISK / signal.volatility) * signal.confidence
+
+        # Apply limits and aggression multiplier
+        smart_leverage = int(round(raw_leverage * AGGRESSION_MULTIPLIER))
+        smart_leverage = max(1, min(smart_leverage, MAX_LEVERAGE))
+
+        # Safety clamp for high volatility
+        if signal.volatility > 0.05:  # >5% daily moves
+            smart_leverage = min(smart_leverage, 3)  # Cap at 3x for volatile assets
+
+        self.logger.info(
+            "Smart leverage calculated",
+            symbol=signal.symbol,
+            volatility=f"{signal.volatility:.2%}",
+            confidence=signal.confidence,
+            leverage=smart_leverage,
+        )
+        return smart_leverage
+
     def calculate_stop_loss(
         self,
         entry_price: Decimal,
@@ -296,6 +333,22 @@ class RiskManager:
         else:
             return entry_price * (1 + stop_percent)
 
+    def calculate_dynamic_stop_loss(
+        self, entry_price: Decimal, side: OrderSide, volatility: float
+    ) -> Decimal:
+        """Calculate Stop Loss based on Volatility (ATR) instead of fixed %."""
+        # Use 2x Volatility as stop distance (standard practice)
+        stop_distance_percent = Decimal(str(volatility)) * 2
+
+        # Fallback to config if volatility is missing
+        if stop_distance_percent == 0:
+            stop_distance_percent = Decimal(str(self.risk_settings.stop_loss_percent)) / 100
+
+        if side == OrderSide.BUY:
+            return entry_price * (1 - stop_distance_percent)
+        else:
+            return entry_price * (1 + stop_distance_percent)
+
     def calculate_take_profit(
         self,
         entry_price: Decimal,
@@ -316,6 +369,22 @@ class RiskManager:
             return entry_price * (1 + tp_percent)
         else:
             return entry_price * (1 - tp_percent)
+
+    def calculate_dynamic_take_profit(
+        self, entry_price: Decimal, side: OrderSide, volatility: float
+    ) -> Decimal:
+        """Calculate Take Profit striving for 1.5 Reward:Risk Ratio."""
+        stop_distance_percent = Decimal(str(volatility)) * 2
+        if stop_distance_percent == 0:
+            stop_distance_percent = Decimal(str(self.risk_settings.stop_loss_percent)) / 100
+
+        # Target 1.5x the risk
+        tp_distance_percent = stop_distance_percent * Decimal("1.5")
+
+        if side == OrderSide.BUY:
+            return entry_price * (1 + tp_distance_percent)
+        else:
+            return entry_price * (1 - tp_distance_percent)
 
     def add_position(self, position: Position) -> None:
         """Add a new position to tracking.

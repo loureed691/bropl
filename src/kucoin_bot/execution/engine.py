@@ -88,7 +88,12 @@ class ExecutionEngine:
                 if check.severity == "critical":
                     return None
 
-        # Calculate position size
+        # 1. Calculate Smart Leverage
+        leverage = self.risk_manager.calculate_smart_leverage(signal)
+
+        # 2. Calculate Position Size
+        # Note: Leverage is calculated and stored in the position but not applied to position sizing
+        # in spot trading. For futures trading, this leverage value would be used when placing orders.
         position_size = self.risk_manager.calculate_position_size(
             signal, available_balance
         )
@@ -113,7 +118,7 @@ class ExecutionEngine:
 
             if order:
                 await self._track_order_fill(order)
-                await self._manage_position(signal, order)
+                await self._manage_position(signal, order, leverage)
 
             return order
 
@@ -315,22 +320,25 @@ class ExecutionEngine:
             symbol=order.symbol,
         )
 
-    async def _manage_position(self, _: TradingSignal, order: Order) -> None:
+    async def _manage_position(
+        self, signal: TradingSignal, order: Order, leverage: int = 1
+    ) -> None:
         """Manage position after order execution.
 
         Args:
-            _: Original trading signal (unused, kept for interface)
+            signal: Original trading signal
             order: Executed order
+            leverage: Leverage used for the position
         """
         if not order.is_filled or not order.filled_price:
             return
 
-        # Calculate stop loss and take profit
-        stop_loss = self.risk_manager.calculate_stop_loss(
-            order.filled_price, order.side
+        # 3. Calculate Dynamic SL/TP
+        stop_loss = self.risk_manager.calculate_dynamic_stop_loss(
+            order.filled_price, order.side, signal.volatility
         )
-        take_profit = self.risk_manager.calculate_take_profit(
-            order.filled_price, order.side
+        take_profit = self.risk_manager.calculate_dynamic_take_profit(
+            order.filled_price, order.side, signal.volatility
         )
 
         # Create position
@@ -343,6 +351,7 @@ class ExecutionEngine:
             stop_loss=stop_loss,
             take_profit=take_profit,
             order_ids=[order.id or ""],
+            leverage=leverage,
         )
 
         self.risk_manager.add_position(position)

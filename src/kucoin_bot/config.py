@@ -135,6 +135,11 @@ class RiskSettings(BaseSettings):
     take_profit_percent: Annotated[float, Field(default=3.0, gt=0, le=100, description="Take profit percentage")]
     max_open_positions: Annotated[int, Field(default=5, gt=0, description="Maximum open positions")]
 
+    # Smart leverage settings
+    max_leverage: Annotated[int, Field(default=20, gt=0, le=100, description="Maximum leverage multiplier")]
+    target_risk_percent: Annotated[float, Field(default=2.0, gt=0, le=10, description="Target risk per trade as percentage")]
+    leverage_aggression_multiplier: Annotated[int, Field(default=10, gt=0, le=50, description="Aggression multiplier for leverage calculation")]
+
 
 class StrategySettings(BaseSettings):
     """Strategy configuration settings."""

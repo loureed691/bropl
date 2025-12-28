@@ -445,6 +445,62 @@ class TestSelectBestStrategy:
         # With weak signal and low volatility, should return grid
         assert strategy == "grid"
 
+    def test_high_adx_strong_signal_returns_momentum(self) -> None:
+        """Test that high ADX with strong signal returns momentum."""
+        strategy = select_best_strategy(
+            signal_type="bullish",
+            signal_strength=0.7,  # Strong signal
+            volatility=0.03,  # Moderate volatility
+            volume_24h=Decimal("500000"),
+            adx_strength=30.0,  # Strong trend (ADX > 25)
+        )
+        assert strategy == "momentum"
+
+    def test_high_adx_weak_signal_returns_dca(self) -> None:
+        """Test that high ADX with weak signal returns DCA."""
+        strategy = select_best_strategy(
+            signal_type="bullish",
+            signal_strength=0.4,  # Weak signal
+            volatility=0.03,  # Moderate volatility
+            volume_24h=Decimal("500000"),
+            adx_strength=30.0,  # Strong trend but weak signal
+        )
+        assert strategy == "dca"
+
+    def test_low_adx_high_volatility_returns_grid(self) -> None:
+        """Test that low ADX with high volatility returns grid."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.5,  # Moderate signal
+            volatility=0.04,  # > 3% volatility
+            volume_24h=Decimal("500000"),
+            adx_strength=15.0,  # Ranging market (ADX < 20)
+        )
+        assert strategy == "grid"
+
+    def test_low_adx_low_volatility_returns_mean_reversion(self) -> None:
+        """Test that low ADX with low volatility returns mean reversion."""
+        strategy = select_best_strategy(
+            signal_type="neutral",
+            signal_strength=0.5,  # Moderate signal
+            volatility=0.02,  # <= 3% volatility
+            volume_24h=Decimal("500000"),
+            adx_strength=15.0,  # Ranging market (ADX < 20)
+        )
+        assert strategy == "mean_reversion"
+
+    def test_very_high_volatility_returns_scalping_without_adx(self) -> None:
+        """Test that very high volatility returns scalping when ADX is not provided."""
+        strategy = select_best_strategy(
+            signal_type="bullish",
+            signal_strength=0.7,  # Strong signal (not in bear market)
+            volatility=0.08,  # > 6% volatility
+            volume_24h=Decimal("500000"),
+            adx_strength=0.0,  # No ADX data
+        )
+        # With strong bullish signal, not a bear market, high volatility -> scalping
+        assert strategy == "scalping"
+
 
 class TestPairScoreRecommendedStrategy:
     """Tests for PairScore recommended_strategy field."""
