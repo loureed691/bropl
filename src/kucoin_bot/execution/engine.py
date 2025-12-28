@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from asyncio_throttle import Throttler  # type: ignore[attr-defined]
@@ -25,6 +25,9 @@ from kucoin_bot.models.data_models import (
 )
 from kucoin_bot.risk_management.manager import RiskManager
 
+if TYPE_CHECKING:
+    from kucoin_bot.api.websocket import WebSocketManager
+
 logger = structlog.get_logger()
 
 
@@ -36,6 +39,7 @@ class ExecutionEngine:
         client: KuCoinClient,
         risk_manager: RiskManager,
         settings: Settings,
+        ws_manager: "WebSocketManager | None" = None,
     ) -> None:
         """Initialize execution engine.
 
@@ -43,14 +47,20 @@ class ExecutionEngine:
             client: KuCoin API client
             risk_manager: Risk management system
             settings: Application settings
+            ws_manager: Optional WebSocket manager for real-time order updates
         """
         self.client = client
         self.risk_manager = risk_manager
         self.settings = settings
+        self.ws_manager = ws_manager
         self.throttler = Throttler(rate_limit=10, period=1)  # 10 requests per second
         self.pending_orders: dict[str, Order] = {}
         self.executed_orders: list[Order] = []
         self.logger = logger.bind(component="execution_engine")
+
+        # Track orders waiting for WebSocket updates
+        self._ws_order_events: dict[str, asyncio.Event] = {}
+        self._ws_order_data: dict[str, dict[str, Any]] = {}
 
     def load_pending_orders(self, orders: dict[str, Order]) -> None:
         """Load pending orders from persistent state.
@@ -60,6 +70,56 @@ class ExecutionEngine:
         """
         self.pending_orders = orders
         self.logger.info("Pending orders loaded from state", count=len(orders))
+
+    async def setup_order_tracking(self) -> None:
+        """Set up WebSocket-based order tracking if available.
+
+        This subscribes to real-time order execution updates via the private
+        WebSocket channel, providing immediate notification of order fills
+        instead of relying solely on polling.
+        """
+        if self.ws_manager and self.ws_manager._is_private:
+            try:
+                await self.ws_manager.subscribe_order_updates(self._handle_order_update)
+                self.logger.info("WebSocket order tracking enabled")
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to setup WebSocket order tracking, will use polling only",
+                    error=str(e),
+                )
+        else:
+            self.logger.info("WebSocket order tracking not available, using polling only")
+
+    def _handle_order_update(self, data: dict[str, Any]) -> None:
+        """Handle real-time order update from WebSocket.
+
+        Args:
+            data: Order update data from WebSocket
+        """
+        order_id = data.get("orderId", "")
+        client_oid = data.get("clientOid", "")
+        update_type = data.get("type", "")
+        status = data.get("status", "")
+
+        self.logger.debug(
+            "Order update received",
+            order_id=order_id,
+            client_oid=client_oid,
+            type=update_type,
+            status=status,
+        )
+
+        # Store the update data
+        if order_id:
+            self._ws_order_data[order_id] = data
+        if client_oid:
+            self._ws_order_data[client_oid] = data
+
+        # Signal any waiting coroutines
+        if order_id in self._ws_order_events:
+            self._ws_order_events[order_id].set()
+        if client_oid in self._ws_order_events:
+            self._ws_order_events[client_oid].set()
 
     async def execute_signal(
         self,
@@ -261,7 +321,11 @@ class ExecutionEngine:
             return order
 
     async def _track_order_fill(self, order: Order, timeout: int = 30) -> None:
-        """Wait for order to be filled.
+        """Wait for order to be filled using WebSocket updates with polling fallback.
+
+        This method now uses WebSocket order updates as the primary mechanism for
+        detecting order fills, with REST API polling as a fallback. This ensures
+        orders are tracked reliably even if they take longer than the timeout period.
 
         Args:
             order: Order to track
@@ -269,7 +333,79 @@ class ExecutionEngine:
         """
         start_time = time.time()
 
+        # Set up WebSocket event if available
+        use_websocket = self.ws_manager and self.ws_manager._is_private
+        if use_websocket and order.id:
+            self._ws_order_events[order.id] = asyncio.Event()
+            if order.client_order_id:
+                self._ws_order_events[order.client_order_id] = asyncio.Event()
+
         while time.time() - start_time < timeout:
+            # Try WebSocket updates first if available
+            if use_websocket:
+                try:
+                    # Wait for WebSocket update with short timeout
+                    event = self._ws_order_events.get(order.id or order.client_order_id)
+                    if event:
+                        await asyncio.wait_for(event.wait(), timeout=1.0)
+
+                        # Get the update data
+                        ws_data = self._ws_order_data.get(order.id or order.client_order_id)
+                        if ws_data:
+                            update_type = ws_data.get("type", "")
+                            ws_status = ws_data.get("status", "")
+
+                            # Handle different update types
+                            if update_type == "filled" or ws_status == "done":
+                                # Order is fully filled
+                                order.status = OrderStatus.FILLED
+                                order.filled_size = Decimal(str(ws_data.get("filledSize", "0")))
+                                order.filled_price = Decimal(str(ws_data.get("matchPrice",
+                                    ws_data.get("price", "0"))))
+                                order.fee = Decimal("0")  # Fee info may need separate query
+                                order.updated_at = datetime.now(UTC)
+
+                                self.executed_orders.append(order)
+                                if order.client_order_id in self.pending_orders:
+                                    del self.pending_orders[order.client_order_id]
+
+                                # Clean up
+                                self._cleanup_order_tracking(order)
+
+                                self.logger.info(
+                                    "Order filled (WebSocket)",
+                                    order_id=order.id,
+                                    symbol=order.symbol,
+                                    filled_size=str(order.filled_size),
+                                    filled_price=str(order.filled_price),
+                                )
+                                return
+
+                            elif update_type == "canceled":
+                                order.status = OrderStatus.CANCELLED
+                                order.updated_at = datetime.now(UTC)
+
+                                if order.client_order_id in self.pending_orders:
+                                    del self.pending_orders[order.client_order_id]
+
+                                # Clean up
+                                self._cleanup_order_tracking(order)
+
+                                self.logger.warning(
+                                    "Order cancelled (WebSocket)",
+                                    order_id=order.id,
+                                    status=order.status.value,
+                                )
+                                return
+
+                            # Reset event for next update
+                            event.clear()
+
+                except TimeoutError:
+                    # No WebSocket update, fall through to polling
+                    pass
+
+            # Fallback to REST API polling
             await asyncio.sleep(0.5)
 
             async with self.throttler:
@@ -289,8 +425,11 @@ class ExecutionEngine:
                 if order.client_order_id in self.pending_orders:
                     del self.pending_orders[order.client_order_id]
 
+                # Clean up
+                self._cleanup_order_tracking(order)
+
                 self.logger.info(
-                    "Order filled",
+                    "Order filled (polling)",
                     order_id=order.id,
                     symbol=order.symbol,
                     filled_size=str(order.filled_size),
@@ -306,19 +445,38 @@ class ExecutionEngine:
                 if order.client_order_id in self.pending_orders:
                     del self.pending_orders[order.client_order_id]
 
+                # Clean up
+                self._cleanup_order_tracking(order)
+
                 self.logger.warning(
-                    "Order not filled",
+                    "Order not filled (polling)",
                     order_id=order.id,
                     status=order.status.value,
                 )
                 return
 
-        # Timeout - order might be partially filled
+        # Timeout - order might be partially filled or still pending
+        # Clean up tracking data but keep order in pending_orders for sync_positions to handle
+        self._cleanup_order_tracking(order)
+
         self.logger.warning(
-            "Order tracking timeout",
+            "Order tracking timeout - order remains in pending_orders for monitoring",
             order_id=order.id,
             symbol=order.symbol,
         )
+
+    def _cleanup_order_tracking(self, order: Order) -> None:
+        """Clean up WebSocket tracking data for an order.
+
+        Args:
+            order: Order to clean up tracking for
+        """
+        if order.id:
+            self._ws_order_events.pop(order.id, None)
+            self._ws_order_data.pop(order.id, None)
+        if order.client_order_id:
+            self._ws_order_events.pop(order.client_order_id, None)
+            self._ws_order_data.pop(order.client_order_id, None)
 
     async def _manage_position(
         self, signal: TradingSignal, order: Order, leverage: int = 1

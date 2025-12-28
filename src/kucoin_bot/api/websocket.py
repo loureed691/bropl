@@ -1,7 +1,10 @@
 """WebSocket client for real-time market data and private channel updates."""
 
 import asyncio
+import base64
 import contextlib
+import hashlib
+import hmac
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -45,6 +48,7 @@ class WebSocketManager:
         self._endpoint: str | None = None
         self._ping_interval = 30
         self._reconnect_delay = 5
+        self._is_private = False  # Track if connected to private channel
         self.logger = logger.bind(component="websocket_manager")
 
     async def connect(self, private: bool = False) -> None:
@@ -58,12 +62,17 @@ class WebSocketManager:
         self._token = token_data["token"]
         self._endpoint = token_data["instanceServers"][0]["endpoint"]
         self._ping_interval = token_data["instanceServers"][0].get("pingInterval", 30000) // 1000
+        self._is_private = private
 
         # Build connection URL
         connect_id = int(time.time() * 1000)
         ws_url = f"{self._endpoint}?token={self._token}&connectId={connect_id}"
 
-        self.logger.info("Connecting to WebSocket", endpoint=self._endpoint)
+        self.logger.info(
+            "Connecting to WebSocket",
+            endpoint=self._endpoint,
+            private=private,
+        )
 
         self._ws = await websockets.connect(ws_url)
         self._running = True
@@ -74,7 +83,7 @@ class WebSocketManager:
         if welcome_data.get("type") != "welcome":
             raise ConnectionError("Failed to receive welcome message")
 
-        self.logger.info("WebSocket connected successfully")
+        self.logger.info("WebSocket connected successfully", private=private)
 
         # Start background tasks
         self._ping_task = asyncio.create_task(self._ping_loop())
@@ -91,7 +100,47 @@ class WebSocketManager:
         """
         endpoint = "/api/v1/bullet-private" if private else "/api/v1/bullet-public"
 
-        async with aiohttp.ClientSession() as session, session.post(f"{self.base_url}{endpoint}") as response:
+        # For private channels, we need to add authentication headers
+        headers = {}
+        if private:
+            timestamp = str(int(time.time() * 1000))
+            str_to_sign = f"{timestamp}POST{endpoint}"
+
+            # Get secret and passphrase
+            secret = self.settings.kucoin.api_secret.get_secret_value()
+            passphrase = self.settings.kucoin.api_passphrase.get_secret_value()
+
+            # Generate signature
+            signature = base64.b64encode(
+                hmac.new(
+                    secret.encode("utf-8"),
+                    str_to_sign.encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+            ).decode("utf-8")
+
+            # Encrypt passphrase
+            encrypted_passphrase = base64.b64encode(
+                hmac.new(
+                    secret.encode("utf-8"),
+                    passphrase.encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+            ).decode("utf-8")
+
+            headers = {
+                "KC-API-KEY": self.settings.kucoin.api_key.get_secret_value(),
+                "KC-API-SIGN": signature,
+                "KC-API-TIMESTAMP": timestamp,
+                "KC-API-PASSPHRASE": encrypted_passphrase,
+                "KC-API-KEY-VERSION": "2",
+                "Content-Type": "application/json",
+            }
+
+        async with aiohttp.ClientSession() as session, session.post(
+            f"{self.base_url}{endpoint}",
+            headers=headers
+        ) as response:
             data: dict[str, Any] = await response.json()
             if data.get("code") != "200000":
                 raise ConnectionError(f"Failed to get WS token: {data.get('msg')}")
@@ -172,10 +221,12 @@ class WebSocketManager:
             await asyncio.sleep(delay)
 
             try:
-                await self.connect()
+                await self.connect(private=self._is_private)
                 # Resubscribe to previous topics
                 for topic in list(self._subscriptions):
-                    await self._send_subscription(topic, True)
+                    # Determine if topic is private based on common private topics
+                    is_private = topic.startswith("/spotMarket/tradeOrders")
+                    await self._send_subscription(topic, True, private=is_private)
 
                 self.logger.info("Reconnection successful", attempt=attempt)
                 return
@@ -241,12 +292,13 @@ class WebSocketManager:
             except Exception as e:
                 self.logger.error("Callback error", error=str(e), topic=topic)
 
-    async def _send_subscription(self, topic: str, subscribe: bool = True) -> None:
+    async def _send_subscription(self, topic: str, subscribe: bool = True, private: bool = False) -> None:
         """Send subscription/unsubscription message.
 
         Args:
             topic: Topic to subscribe/unsubscribe
             subscribe: True to subscribe, False to unsubscribe
+            private: Whether this is a private channel subscription
         """
         if not self._ws:
             raise ConnectionError("WebSocket not connected")
@@ -256,7 +308,7 @@ class WebSocketManager:
             "id": str(self._connect_id),
             "type": "subscribe" if subscribe else "unsubscribe",
             "topic": topic,
-            "privateChannel": False,
+            "privateChannel": private,
             "response": True,
         })
 
@@ -271,6 +323,7 @@ class WebSocketManager:
             "Subscription updated",
             topic=topic,
             action="subscribe" if subscribe else "unsubscribe",
+            private=private,
         )
 
     def on(self, topic: str, callback: Callable[[Any], None]) -> None:
@@ -425,6 +478,52 @@ class WebSocketManager:
 
         self.on(topic, parse_candle)
         await self._send_subscription(topic)
+
+    async def subscribe_order_updates(
+        self,
+        callback: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Subscribe to private order execution updates.
+
+        This subscribes to the /spotMarket/tradeOrders channel for real-time
+        order execution updates including fills, cancellations, and status changes.
+
+        Args:
+            callback: Function to call with order update data
+
+        Note:
+            Requires private WebSocket connection to be established first.
+        """
+        if not self._is_private:
+            raise ConnectionError("Private channel connection required for order updates")
+
+        topic = "/spotMarket/tradeOrders"
+
+        def parse_order_update(data: dict[str, Any]) -> None:
+            """Parse order update message and call user callback.
+
+            Order update data structure:
+            {
+                "symbol": "BTC-USDT",
+                "orderType": "limit/market",
+                "side": "buy/sell",
+                "orderId": "...",
+                "type": "open/match/filled/canceled/update",
+                "orderTime": timestamp,
+                "size": "total order size",
+                "filledSize": "filled size",
+                "price": "order price",
+                "clientOid": "client order id",
+                "remainSize": "remaining size",
+                "status": "open/done",
+                "ts": timestamp,
+                ...
+            }
+            """
+            callback(data)
+
+        self.on(topic, parse_order_update)
+        await self._send_subscription(topic, subscribe=True, private=True)
 
     async def unsubscribe(self, topic: str) -> None:
         """Unsubscribe from a topic.
