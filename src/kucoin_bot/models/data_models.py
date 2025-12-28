@@ -170,6 +170,7 @@ class Position(BaseModel):
     take_profit: Annotated[Decimal | None, Field(default=None, gt=0)]
     opened_at: datetime = Field(default_factory=utc_now)
     order_ids: list[str] = Field(default_factory=list)
+    leverage: int = Field(default=1, ge=1)  # Track leverage used
 
     @property
     def unrealized_pnl(self) -> Decimal:
@@ -202,6 +203,8 @@ class TradingSignal(BaseModel):
     timestamp: datetime = Field(default_factory=utc_now)
     indicators: dict[str, float] = Field(default_factory=dict)
     reason: str = ""
+    volatility: float = 0.0  # Add volatility (ATR % or similar)
+    recommended_leverage: int = 1  # Add recommended leverage
 
     @property
     def is_actionable(self) -> bool:

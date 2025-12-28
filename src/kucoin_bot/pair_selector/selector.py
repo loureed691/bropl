@@ -19,6 +19,7 @@ def select_best_strategy(
     signal_strength: float,
     volatility: float,
     volume_24h: Decimal,
+    adx_strength: float = 0.0,  # NEW PARAMETER
 ) -> str:
     """Select the best trading strategy based on market conditions.
 
@@ -34,6 +35,7 @@ def select_best_strategy(
         signal_strength: Strength of the signal (0.0 to 1.0)
         volatility: Price volatility (0.0 to 1.0, typically 0.01-0.10)
         volume_24h: 24-hour trading volume in USDT
+        adx_strength: Average Directional Index strength (0.0 to 100.0)
 
     Returns:
         Name of the recommended strategy
@@ -52,11 +54,30 @@ def select_best_strategy(
     weak_signal = signal_strength < 0.4
 
     # Bear market indicator (strong bearish or high volatility with weak bullish)
-    is_bear_market = (
-        signal_type == "bearish" and strong_signal
-    ) or (high_volatility and signal_type != "bullish")
+    is_bear_market = (signal_type == "bearish" and strong_signal) or (
+        high_volatility and signal_type != "bullish"
+    )
 
-    # Strategy selection logic
+    # 1. STRONG TREND (ADX > 25) - Only applies when ADX is provided
+    if adx_strength > 25:
+        if signal_strength > 0.6:
+            return "momentum"  # Ride the trend
+        else:
+            return "dca"  # Trend is strong but signal weak? Accumulate on dips.
+
+    # 2. RANGING / SIDEWAYS (ADX < 20) - Only applies when ADX is provided
+    elif adx_strength < 20 and adx_strength > 0:
+        if volatility > 0.03:
+            return "grid"  # Volatile sideways = Grid profits
+        else:
+            return "mean_reversion"  # Stable sideways = Bollinger Bounces
+
+    # 3. HIGH VOLATILITY CHAOS - Only when not in strong trend/ranging (ADX not indicating)
+    # Prioritize scalping only when volatility is extreme (>6%) and not in bear market
+    if volatility > 0.06 and not is_bear_market:
+        return "scalping"  # Get in and out fast
+
+    # Strategy selection logic (when ADX is 0 or not decisive)
     # 1. High volatility, bearish or uncertain market -> DCA for accumulation
     if is_bear_market or (high_volatility and weak_signal):
         return "dca"

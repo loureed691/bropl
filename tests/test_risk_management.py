@@ -211,6 +211,116 @@ class TestRiskManager:
         assert removed is not None
         assert "BTC-USDT" not in risk_manager.positions
 
+    def test_calculate_smart_leverage_low_volatility_high_confidence(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test smart leverage with low volatility and high confidence."""
+        signal = TradingSignal(
+            symbol="BTC-USDT",
+            signal_type=SignalType.BUY,
+            confidence=0.9,
+            price=Decimal("50000"),
+            volatility=0.01,  # 1% volatility
+        )
+
+        leverage = risk_manager.calculate_smart_leverage(signal)
+        # With 0.01 volatility and 0.9 confidence: (0.02 / 0.01) * 0.9 * 10 = 18
+        assert leverage > 1
+        assert leverage <= 20  # Should not exceed MAX_LEVERAGE
+
+    def test_calculate_smart_leverage_high_volatility(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test smart leverage with high volatility caps at 3x."""
+        signal = TradingSignal(
+            symbol="BTC-USDT",
+            signal_type=SignalType.BUY,
+            confidence=0.9,
+            price=Decimal("50000"),
+            volatility=0.08,  # 8% volatility (high)
+        )
+
+        leverage = risk_manager.calculate_smart_leverage(signal)
+        # High volatility should cap at 3x
+        assert leverage <= 3
+
+    def test_calculate_smart_leverage_zero_volatility(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test smart leverage with zero volatility returns 1."""
+        signal = TradingSignal(
+            symbol="BTC-USDT",
+            signal_type=SignalType.BUY,
+            confidence=0.9,
+            price=Decimal("50000"),
+            volatility=0.0,
+        )
+
+        leverage = risk_manager.calculate_smart_leverage(signal)
+        assert leverage == 1
+
+    def test_calculate_dynamic_stop_loss_with_volatility(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test dynamic stop loss calculation with volatility."""
+        # 2% volatility means 4% stop distance (2x volatility)
+        stop_loss = risk_manager.calculate_dynamic_stop_loss(
+            Decimal("50000"),
+            OrderSide.BUY,
+            0.02,
+        )
+        # 50000 * (1 - 0.04) = 48000
+        assert stop_loss == Decimal("48000")
+
+    def test_calculate_dynamic_stop_loss_fallback(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test dynamic stop loss falls back to config when volatility is zero."""
+        stop_loss = risk_manager.calculate_dynamic_stop_loss(
+            Decimal("50000"),
+            OrderSide.BUY,
+            0.0,
+        )
+        # Should use config's 2%
+        assert stop_loss == Decimal("49000")
+
+    def test_calculate_dynamic_take_profit_with_volatility(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test dynamic take profit calculation with volatility."""
+        # 2% volatility means 4% stop distance, 6% take profit (1.5x stop)
+        take_profit = risk_manager.calculate_dynamic_take_profit(
+            Decimal("50000"),
+            OrderSide.BUY,
+            0.02,
+        )
+        # 50000 * (1 + 0.06) = 53000
+        assert take_profit == Decimal("53000")
+
+    def test_calculate_dynamic_take_profit_fallback(
+        self, risk_manager: RiskManager
+    ) -> None:
+        """Test dynamic take profit falls back to config when volatility is zero."""
+        take_profit = risk_manager.calculate_dynamic_take_profit(
+            Decimal("50000"),
+            OrderSide.BUY,
+            0.0,
+        )
+        # Should use config's 2% stop * 1.5 = 3%
+        assert take_profit == Decimal("51500")
+        position = Position(
+            symbol="BTC-USDT",
+            side=OrderSide.BUY,
+            entry_price=Decimal("50000"),
+            size=Decimal("1"),
+            current_price=Decimal("50000"),
+        )
+        risk_manager.add_position(position)
+
+        removed = risk_manager.remove_position("BTC-USDT")
+        assert removed is not None
+        assert "BTC-USDT" not in risk_manager.positions
+
     def test_should_close_position_stop_loss(self, risk_manager: RiskManager) -> None:
         """Test position should close at stop loss."""
         position = Position(
