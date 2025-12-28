@@ -162,7 +162,7 @@ class TradingBot:
         loop = asyncio.get_event_loop()
         try:
             for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
+                loop.add_signal_handler(sig, lambda _sig=sig: asyncio.create_task(self.stop()))
         except NotImplementedError:
             # Windows ProactorEventLoop does not support add_signal_handler
             self.logger.info("Signal handlers not supported on this platform. Use Ctrl+C to stop.")
