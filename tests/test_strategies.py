@@ -61,13 +61,15 @@ class TestStrategyState:
 
     def test_update_count_increments(self) -> None:
         """Test that update_count increments on each candle addition."""
-        state = StrategyState(symbol="BTC-USDT", max_candles=10)
+        max_candles = 10
+        state = StrategyState(symbol="BTC-USDT", max_candles=max_candles)
 
         # Initially update_count should be 0
         assert state.update_count == 0
 
-        # Add candles and verify update_count increments
-        for i in range(15):
+        # Add more candles than max_candles to test counter continues beyond buffer limit
+        candles_to_add = max_candles + 5
+        for i in range(candles_to_add):
             candle = Candle(
                 symbol="BTC-USDT",
                 timestamp=datetime.now(UTC),
@@ -80,8 +82,8 @@ class TestStrategyState:
             state.add_candle(candle)
 
         # update_count should continue incrementing even after max_candles is reached
-        assert state.update_count == 15
-        assert len(state.candles) == 10  # Only keep max_candles
+        assert state.update_count == candles_to_add
+        assert len(state.candles) == max_candles  # Only keep max_candles
 
 
 class TestMomentumStrategy:
@@ -214,10 +216,12 @@ class TestDCAStrategy:
 
     def test_dca_continues_after_max_candles(self, strategy: DCAStrategy) -> None:
         """Test that DCA continues working after candles buffer is full."""
-        state = StrategyState(symbol="BTC-USDT", max_candles=500)
+        max_candles = 500
+        state = StrategyState(symbol="BTC-USDT", max_candles=max_candles)
 
-        # Fill candles up to max_candles + extra
-        for i in range(550):
+        # Fill candles beyond max_candles to test counter continues beyond buffer limit
+        candles_to_add = max_candles + 50
+        for i in range(candles_to_add):
             candle = Candle(
                 symbol="BTC-USDT",
                 timestamp=datetime.now(UTC),
@@ -230,8 +234,8 @@ class TestDCAStrategy:
             state.add_candle(candle)
 
         # Verify candles list is capped but update_count continues
-        assert len(state.candles) == 500
-        assert state.update_count == 550
+        assert len(state.candles) == max_candles
+        assert state.update_count == candles_to_add
 
         # Analyze should work correctly using update_count
         signal = strategy.analyze(state)
