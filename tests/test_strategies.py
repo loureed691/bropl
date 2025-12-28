@@ -59,6 +59,32 @@ class TestStrategyState:
         closes = state.get_closes()
         assert closes == [100.0, 101.0, 102.0, 103.0, 104.0]
 
+    def test_update_count_increments(self) -> None:
+        """Test that update_count increments on each candle addition."""
+        max_candles = 10
+        state = StrategyState(symbol="BTC-USDT", max_candles=max_candles)
+
+        # Initially update_count should be 0
+        assert state.update_count == 0
+
+        # Add more candles than max_candles to test counter continues beyond buffer limit
+        candles_to_add = max_candles + 5
+        for i in range(candles_to_add):
+            candle = Candle(
+                symbol="BTC-USDT",
+                timestamp=datetime.now(UTC),
+                open=Decimal(str(100 + i)),
+                high=Decimal(str(105 + i)),
+                low=Decimal(str(95 + i)),
+                close=Decimal(str(102 + i)),
+                volume=Decimal("100"),
+            )
+            state.add_candle(candle)
+
+        # update_count should continue incrementing even after max_candles is reached
+        assert state.update_count == candles_to_add
+        assert len(state.candles) == max_candles  # Only keep max_candles
+
 
 class TestMomentumStrategy:
     """Tests for momentum strategy."""
@@ -187,6 +213,99 @@ class TestDCAStrategy:
     def test_strategy_name(self, strategy: DCAStrategy) -> None:
         """Test strategy name."""
         assert strategy.name == "dca"
+
+    def test_dca_continues_after_max_candles(self, strategy: DCAStrategy) -> None:
+        """Test that DCA continues working after candles buffer is full."""
+        max_candles = 500
+        state = StrategyState(symbol="BTC-USDT", max_candles=max_candles)
+
+        # Fill candles beyond max_candles to test counter continues beyond buffer limit
+        candles_to_add = max_candles + 50
+        for i in range(candles_to_add):
+            candle = Candle(
+                symbol="BTC-USDT",
+                timestamp=datetime.now(UTC),
+                open=Decimal(str(50000 + i)),
+                high=Decimal(str(50100 + i)),
+                low=Decimal(str(49900 + i)),
+                close=Decimal(str(50050 + i)),
+                volume=Decimal("100"),
+            )
+            state.add_candle(candle)
+
+        # Verify candles list is capped but update_count continues
+        assert len(state.candles) == max_candles
+        assert state.update_count == candles_to_add
+
+        # Analyze should work correctly using update_count
+        signal = strategy.analyze(state)
+
+        # Should have a valid signal (not fail due to candle list length)
+        assert signal is not None
+        assert signal.symbol == "BTC-USDT"
+
+        # The indicators should show candles_since_buy based on update_count
+        assert "candles_since_buy" in state.indicators
+
+    def test_dca_buy_interval_with_monotonic_counter(
+        self, strategy: DCAStrategy
+    ) -> None:
+        """Test DCA buy interval uses monotonic counter correctly."""
+        state = StrategyState(symbol="BTC-USDT")
+
+        # Add candles and check signals at specific intervals
+        for _ in range(60):
+            candle = Candle(
+                symbol="BTC-USDT",
+                timestamp=datetime.now(UTC),
+                open=Decimal("50000"),
+                high=Decimal("50100"),
+                low=Decimal("49900"),
+                close=Decimal("50050"),
+                volume=Decimal("100"),
+            )
+            state.add_candle(candle)
+
+        # At count=60, analyze
+        signal = strategy.analyze(state)
+        # First call should trigger buy (60 >= 24)
+        assert signal.signal_type == SignalType.BUY
+        assert "Regular DCA buy" in signal.reason
+
+        # Add more candles but less than interval
+        for _ in range(10):
+            candle = Candle(
+                symbol="BTC-USDT",
+                timestamp=datetime.now(UTC),
+                open=Decimal("50000"),
+                high=Decimal("50100"),
+                low=Decimal("49900"),
+                close=Decimal("50050"),
+                volume=Decimal("100"),
+            )
+            state.add_candle(candle)
+
+        # At count=70, only 10 candles since last buy, should HOLD
+        signal = strategy.analyze(state)
+        assert signal.signal_type == SignalType.HOLD
+
+        # Add more candles to trigger next buy
+        for _ in range(20):
+            candle = Candle(
+                symbol="BTC-USDT",
+                timestamp=datetime.now(UTC),
+                open=Decimal("50000"),
+                high=Decimal("50100"),
+                low=Decimal("49900"),
+                close=Decimal("50050"),
+                volume=Decimal("100"),
+            )
+            state.add_candle(candle)
+
+        # At count=90, 30 candles since last buy (>= 24), should BUY again
+        signal = strategy.analyze(state)
+        assert signal.signal_type == SignalType.BUY
+        assert "Regular DCA buy" in signal.reason
 
 
 class TestCreateStrategy:

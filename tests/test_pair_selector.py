@@ -198,6 +198,36 @@ class TestPairSelector:
         score = await selector.analyze_pair("BTC-USDT")
         assert score is None  # Filtered out due to insufficient candles
 
+    async def test_analyze_pair_calculates_adx(
+        self, selector: PairSelector, mock_client: MagicMock
+    ) -> None:
+        """Test that analyze_pair calculates ADX for strategy selection."""
+        # Create enough candles with trend data for ADX calculation
+        mock_candles = [
+            MagicMock(
+                close=Decimal(str(100 + i * 0.5)),  # Upward trend
+                high=Decimal(str(105 + i * 0.5)),
+                low=Decimal(str(95 + i * 0.5)),
+            )
+            for i in range(60)
+        ]
+        mock_client.get_candles.return_value = mock_candles
+        mock_client.get_24h_stats.return_value = {"volValue": "500000", "changeRate": "0.025"}
+
+        score = await selector.analyze_pair("BTC-USDT")
+
+        # Should successfully analyze the pair
+        assert score is not None
+        assert score.symbol == "BTC-USDT"
+        # ADX should have been calculated (strategy selection uses it)
+        assert score.recommended_strategy in [
+            "momentum",
+            "mean_reversion",
+            "grid",
+            "scalping",
+            "dca",
+        ]
+
     async def test_get_bullish_pairs(
         self, selector: PairSelector, mock_client: MagicMock
     ) -> None:
