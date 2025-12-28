@@ -250,7 +250,7 @@ class TestDCAStrategy:
         state = StrategyState(symbol="BTC-USDT")
 
         # Add candles and check signals at specific intervals
-        for i in range(60):
+        for _ in range(60):
             candle = Candle(
                 symbol="BTC-USDT",
                 timestamp=datetime.now(UTC),
@@ -269,7 +269,7 @@ class TestDCAStrategy:
         assert "Regular DCA buy" in signal.reason
 
         # Add more candles but less than interval
-        for i in range(10):
+        for _ in range(10):
             candle = Candle(
                 symbol="BTC-USDT",
                 timestamp=datetime.now(UTC),
@@ -286,7 +286,7 @@ class TestDCAStrategy:
         assert signal.signal_type == SignalType.HOLD
 
         # Add more candles to trigger next buy
-        for i in range(20):
+        for _ in range(20):
             candle = Candle(
                 symbol="BTC-USDT",
                 timestamp=datetime.now(UTC),
