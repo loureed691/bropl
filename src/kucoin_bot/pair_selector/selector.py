@@ -6,10 +6,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+import numpy as np
 import structlog
 
 from kucoin_bot.api.client import KuCoinClient
-from kucoin_bot.indicators.technical import SignalGenerator
+from kucoin_bot.indicators.technical import SignalGenerator, TechnicalIndicators
 
 logger = structlog.get_logger()
 
@@ -275,6 +276,15 @@ class PairSelector:
             # Get signal analysis
             signal_type, signal_strength = self.signal_generator.get_overall_signal(closes)
 
+            # Calculate ADX for strategy selection
+            adx_values, _, _ = TechnicalIndicators.adx(highs, lows, closes)
+            # Get last ADX value, handle empty/NaN
+            adx_strength = (
+                float(adx_values[-1])
+                if len(adx_values) > 0 and not np.isnan(adx_values[-1])
+                else 0.0
+            )
+
             # Get detailed indicators
             signals = self.signal_generator.combined_signal(closes)
             indicators = {
@@ -287,6 +297,7 @@ class PairSelector:
                 signal_strength=signal_strength,
                 volatility=volatility,
                 volume_24h=volume_24h,
+                adx_strength=adx_strength,
             )
 
             return PairScore(

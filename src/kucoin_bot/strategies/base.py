@@ -30,10 +30,12 @@ class StrategyState:
     candles: list[Candle] = field(default_factory=list)
     max_candles: int = 500
     indicators: dict[str, float] = field(default_factory=dict)
+    update_count: int = 0  # Monotonic counter for tracking updates
 
     def add_candle(self, candle: Candle) -> None:
         """Add a candle to the history."""
         self.candles.append(candle)
+        self.update_count += 1  # Increment counter on every update
         if len(self.candles) > self.max_candles:
             self.candles = self.candles[-self.max_candles :]
 
@@ -475,13 +477,17 @@ class DCAStrategy(BaseStrategy):
         """Analyze for DCA opportunities."""
         closes = state.get_closes()
         current_price = Decimal(str(closes[-1]))
-        candle_count = len(state.candles)
+
+        # Use monotonic counter instead of len(state.candles)
+        current_count = state.update_count
 
         # Track last buy
         if state.symbol not in self.last_buy_candle:
+            # Initialize to 0 so first check uses full current_count
             self.last_buy_candle[state.symbol] = 0
 
-        candles_since_buy = candle_count - self.last_buy_candle[state.symbol]
+        # Calculate difference using stable counter
+        candles_since_buy = current_count - self.last_buy_candle[state.symbol]
 
         # Calculate recent price change
         if len(closes) >= 24:
@@ -497,7 +503,7 @@ class DCAStrategy(BaseStrategy):
 
         # Regular DCA buy
         if candles_since_buy >= self.buy_interval:
-            self.last_buy_candle[state.symbol] = candle_count
+            self.last_buy_candle[state.symbol] = current_count
             return TradingSignal(
                 symbol=state.symbol,
                 signal_type=SignalType.BUY,
@@ -509,7 +515,7 @@ class DCAStrategy(BaseStrategy):
 
         # Dip buy opportunity
         if price_change_percent <= -self.dip_threshold:
-            self.last_buy_candle[state.symbol] = candle_count
+            self.last_buy_candle[state.symbol] = current_count
             return TradingSignal(
                 symbol=state.symbol,
                 signal_type=SignalType.BUY,
