@@ -162,7 +162,7 @@ class WebSocketManager:
         while self._running and attempt < max_attempts:
             attempt += 1
             delay = min(base_delay * (2 ** (attempt - 1)), 300)  # Cap at 5 minutes
-            
+
             self.logger.info(
                 "Attempting to reconnect",
                 attempt=attempt,
@@ -176,10 +176,10 @@ class WebSocketManager:
                 # Resubscribe to previous topics
                 for topic in list(self._subscriptions):
                     await self._send_subscription(topic, True)
-                
+
                 self.logger.info("Reconnection successful", attempt=attempt)
                 return
-                
+
             except Exception as e:
                 self.logger.error(
                     "Reconnection attempt failed",

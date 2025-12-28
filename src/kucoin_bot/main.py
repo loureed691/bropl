@@ -818,7 +818,7 @@ class TradingBot:
                 for i, task in enumerate(self._tasks):
                     if task.done():
                         task_name = task.get_name()
-                        
+
                         # Check if task failed
                         try:
                             exception = task.exception()

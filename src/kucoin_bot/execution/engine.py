@@ -499,7 +499,7 @@ class ExecutionEngine:
 
     async def sync_positions(self) -> None:
         """Sync positions with exchange data.
-        
+
         Reconciles internal state with actual exchange balances and orders.
         """
         try:
@@ -518,10 +518,10 @@ class ExecutionEngine:
             # Verify positions still match open orders
             # Remove positions that have no corresponding stop loss orders if they should have one
             symbols_with_orders = {order.symbol for order in open_orders}
-            
+
             for symbol in list(self.risk_manager.positions.keys()):
                 position = self.risk_manager.positions[symbol]
-                
+
                 # Check if position still has protection orders
                 if position.stop_loss and symbol not in symbols_with_orders:
                     self.logger.warning(
