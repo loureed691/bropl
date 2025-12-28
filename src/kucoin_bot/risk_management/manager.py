@@ -281,10 +281,10 @@ class RiskManager:
         High Confidence + Low Volatility = High Leverage
         Low Confidence + High Volatility = Low Leverage
         """
-        # Base leverage settings
-        MAX_LEVERAGE = 20  # Cap at 20x
-        TARGET_RISK = 0.02  # Risk 2% of equity per trade
-        AGGRESSION_MULTIPLIER = 10  # Multiplier to scale up leverage
+        # Base leverage settings (configurable via risk settings)
+        MAX_LEVERAGE = self.risk_settings.max_leverage
+        TARGET_RISK = self.risk_settings.target_risk_percent / 100
+        AGGRESSION_MULTIPLIER = self.risk_settings.leverage_aggression_multiplier
 
         if signal.volatility <= 0:
             return 1
@@ -373,7 +373,7 @@ class RiskManager:
     def calculate_dynamic_take_profit(
         self, entry_price: Decimal, side: OrderSide, volatility: float
     ) -> Decimal:
-        """Calculate Take Profit striving for 1.5 Risk:Reward Ratio."""
+        """Calculate Take Profit striving for 1.5 Reward:Risk Ratio."""
         stop_distance_percent = Decimal(str(volatility)) * 2
         if stop_distance_percent == 0:
             stop_distance_percent = Decimal(str(self.risk_settings.stop_loss_percent)) / 100

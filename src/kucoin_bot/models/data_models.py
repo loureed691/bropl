@@ -203,8 +203,7 @@ class TradingSignal(BaseModel):
     timestamp: datetime = Field(default_factory=utc_now)
     indicators: dict[str, float] = Field(default_factory=dict)
     reason: str = ""
-    volatility: float = 0.0  # Add volatility (ATR % or similar)
-    recommended_leverage: int = 1  # Add recommended leverage
+    volatility: Annotated[float, Field(ge=0, le=1)] = 0.0  # Add volatility (ATR % or similar)
 
     @property
     def is_actionable(self) -> bool:

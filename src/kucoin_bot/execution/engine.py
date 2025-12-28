@@ -91,8 +91,9 @@ class ExecutionEngine:
         # 1. Calculate Smart Leverage
         leverage = self.risk_manager.calculate_smart_leverage(signal)
 
-        # 2. Calculate Dynamic Position Size (factoring in leverage)
-        # Note: For futures, position_size = (balance * leverage * risk_factor)
+        # 2. Calculate Position Size
+        # Note: Leverage is calculated and stored in the position but not applied to position sizing
+        # in spot trading. For futures trading, this leverage value would be used when placing orders.
         position_size = self.risk_manager.calculate_position_size(
             signal, available_balance
         )

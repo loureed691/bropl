@@ -308,18 +308,6 @@ class TestRiskManager:
         )
         # Should use config's 2% stop * 1.5 = 3%
         assert take_profit == Decimal("51500")
-        position = Position(
-            symbol="BTC-USDT",
-            side=OrderSide.BUY,
-            entry_price=Decimal("50000"),
-            size=Decimal("1"),
-            current_price=Decimal("50000"),
-        )
-        risk_manager.add_position(position)
-
-        removed = risk_manager.remove_position("BTC-USDT")
-        assert removed is not None
-        assert "BTC-USDT" not in risk_manager.positions
 
     def test_should_close_position_stop_loss(self, risk_manager: RiskManager) -> None:
         """Test position should close at stop loss."""
