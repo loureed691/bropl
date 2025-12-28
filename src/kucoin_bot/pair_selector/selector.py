@@ -66,7 +66,7 @@ def select_best_strategy(
             return "dca"  # Trend is strong but signal weak? Accumulate on dips.
 
     # 2. RANGING / SIDEWAYS (ADX < 20) - Only applies when ADX is provided
-    elif adx_strength < 20 and adx_strength > 0:
+    elif 0 < adx_strength < 20:
         if volatility > 0.03:
             return "grid"  # Volatile sideways = Grid profits
         else:

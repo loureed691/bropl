@@ -284,6 +284,7 @@ class RiskManager:
         # Base leverage settings
         MAX_LEVERAGE = 20  # Cap at 20x
         TARGET_RISK = 0.02  # Risk 2% of equity per trade
+        AGGRESSION_MULTIPLIER = 10  # Multiplier to scale up leverage
 
         if signal.volatility <= 0:
             return 1
@@ -294,8 +295,8 @@ class RiskManager:
 
         raw_leverage = (TARGET_RISK / signal.volatility) * signal.confidence
 
-        # Apply limits
-        smart_leverage = int(round(raw_leverage * 10))  # Multiplier to be aggressive
+        # Apply limits and aggression multiplier
+        smart_leverage = int(round(raw_leverage * AGGRESSION_MULTIPLIER))
         smart_leverage = max(1, min(smart_leverage, MAX_LEVERAGE))
 
         # Safety clamp for high volatility

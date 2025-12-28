@@ -224,7 +224,7 @@ class TestRiskManager:
         )
 
         leverage = risk_manager.calculate_smart_leverage(signal)
-        # With 0.01 volatility and 0.9 confidence: (0.02 / 0.01) * 0.9 * 10 = 18
+        # Expected: Higher leverage due to low volatility and high confidence
         assert leverage > 1
         assert leverage <= 20  # Should not exceed MAX_LEVERAGE
 
