@@ -61,6 +61,10 @@ data/
 *.json
 !pyproject.toml
 
+# Bot state files
+bot_state.json
+bot_state.tmp
+
 # Temporary files
 tmp/
 temp/

@@ -73,6 +73,12 @@ class TradingSettings(BaseSettings):
     auto_select_signal_type: Annotated[str, Field(default="any", description="Signal type filter: any, bullish, or bearish")]
     auto_select_strategy: Annotated[bool, Field(default=False, description="Enable automatic strategy selection based on market conditions")]
 
+    # Pair scoring weights for composite score calculation
+    pair_score_signal_weight: Annotated[float, Field(default=0.6, ge=0, le=1, description="Weight for signal strength in composite score")]
+    pair_score_volume_weight: Annotated[float, Field(default=0.25, ge=0, le=1, description="Weight for volume in composite score")]
+    pair_score_volatility_weight: Annotated[float, Field(default=0.15, ge=0, le=1, description="Weight for volatility in composite score")]
+    pair_score_volume_threshold: Annotated[float, Field(default=1000000.0, gt=0, description="Volume baseline for scoring normalization (USDT)")]
+
     @field_validator("trading_pairs")
     @classmethod
     def validate_trading_pairs(cls, v: str) -> str:

@@ -98,6 +98,10 @@ class PairScore:
     indicators: dict[str, float] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     recommended_strategy: str = field(default="momentum")
+    signal_weight: float = 0.6
+    volume_weight: float = 0.25
+    volatility_weight: float = 0.15
+    volume_threshold: float = 1_000_000.0
 
     @property
     def composite_score(self) -> float:
@@ -105,23 +109,14 @@ class PairScore:
 
         Higher score = better trading opportunity.
 
-        Composite Score Weights Rationale:
-        - 60% signal strength: Primary factor for trading decision quality.
-          Strong technical signals indicate higher probability setups.
-        - 25% volume: Ensures sufficient liquidity for order execution.
-          Higher volume reduces slippage and provides more reliable price action.
-        - 15% volatility: Preference for moderate volatility (~3% daily range).
-          Too low = insufficient price movement for profits.
-          Too high = excessive risk and unpredictable moves.
+        Uses configurable weights for signal strength, volume, and volatility.
+        Default weights: 60% signal, 25% volume, 15% volatility.
         """
         # Base score from signal strength
         base_score = self.signal_strength
 
         # Volume factor (higher volume = more reliable signals)
-        # Normalize using 1M USDT as baseline for liquid pairs.
-        # This threshold represents typical high-volume altcoin trading activity.
-        volume_threshold = 1_000_000
-        volume_factor = min(1.0, float(self.volume_24h) / volume_threshold)
+        volume_factor = min(1.0, float(self.volume_24h) / self.volume_threshold)
 
         # Volatility factor (moderate volatility ~3% is optimal)
         # Penalize deviation from optimal, capped at 5% deviation for full penalty
@@ -134,7 +129,11 @@ class PairScore:
             volatility_factor = 0.5
 
         # Weighted composite score
-        return (base_score * 0.6) + (volume_factor * 0.25) + (volatility_factor * 0.15)
+        return (
+            (base_score * self.signal_weight)
+            + (volume_factor * self.volume_weight)
+            + (volatility_factor * self.volatility_weight)
+        )
 
 
 class PairSelector:
@@ -146,6 +145,10 @@ class PairSelector:
         min_volume_24h: Decimal = Decimal("100000"),
         min_signal_strength: float = 0.5,
         top_pairs_count: int = 5,
+        signal_weight: float = 0.6,
+        volume_weight: float = 0.25,
+        volatility_weight: float = 0.15,
+        volume_threshold: float = 1_000_000.0,
     ) -> None:
         """Initialize pair selector.
 
@@ -154,11 +157,19 @@ class PairSelector:
             min_volume_24h: Minimum 24h volume in USDT for filtering pairs
             min_signal_strength: Minimum signal strength to consider (0.0 to 1.0)
             top_pairs_count: Number of top pairs to select
+            signal_weight: Weight for signal strength in composite score
+            volume_weight: Weight for volume in composite score
+            volatility_weight: Weight for volatility in composite score
+            volume_threshold: Volume baseline for scoring normalization (USDT)
         """
         self.client = client
         self.min_volume_24h = min_volume_24h
         self.min_signal_strength = min_signal_strength
         self.top_pairs_count = top_pairs_count
+        self.signal_weight = signal_weight
+        self.volume_weight = volume_weight
+        self.volatility_weight = volatility_weight
+        self.volume_threshold = volume_threshold
         self.signal_generator = SignalGenerator()
         self.logger = logger.bind(component="pair_selector")
         self._cached_scores: list[PairScore] = []
@@ -254,6 +265,10 @@ class PairSelector:
                 volatility=volatility,
                 indicators=indicators,
                 recommended_strategy=recommended_strategy,
+                signal_weight=self.signal_weight,
+                volume_weight=self.volume_weight,
+                volatility_weight=self.volatility_weight,
+                volume_threshold=self.volume_threshold,
             )
 
         except Exception as e:

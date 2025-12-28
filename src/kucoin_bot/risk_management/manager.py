@@ -73,6 +73,15 @@ class RiskManager:
         self.trade_history: list[dict[str, Any]] = []
         self.logger = logger.bind(component="risk_manager")
 
+    def load_positions(self, positions: dict[str, Position]) -> None:
+        """Load positions from persistent state.
+
+        Args:
+            positions: Dictionary of positions to load
+        """
+        self.positions = positions
+        self.logger.info("Positions loaded from state", count=len(positions))
+
     def set_portfolio_value(self, value: Decimal) -> None:
         """Update portfolio value and track peak.
 
